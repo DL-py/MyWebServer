@@ -67,6 +67,7 @@ int main( int argc, char* argv[] )
     assert( users );
     int user_count = 0;
 
+    rt_log_init();  // log init
     int listenfd = socket( PF_INET, SOCK_STREAM, 0 );
     assert( listenfd >= 0 );
     struct linger tmp = { 1, 0 };

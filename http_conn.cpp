@@ -448,10 +448,10 @@ void http_conn::execute_register_cgi(){
     char * text = get_line();
     snprintf(m_real_file, FILENAME_LEN, "%s%s", doc_root, m_url);
     
-    if (exec_register_cgi(m_real_file, text, m_content_length, success) == false)
-    {
-        
-    }
+//    if (exec_register_cgi(m_real_file, text, m_content_length, success) == false)
+//    {
+//
+//    }
 
     
     int pipe_parent2child[2];

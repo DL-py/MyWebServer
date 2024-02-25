@@ -1,0 +1,27 @@
+[Info]{2024/2/25 9:59:27} html:
+HTTP/1.1 200 OK
+Connection: keep-alive
+Content-Length: 240
+Transfer-Encoding: chunked
+Content-type:text/html
+
+110
+length is  106
+is_repeat is  1
+<html>
+<head>
+<title>Login</title>
+<meta charset="utf-8">
+</head>
+<body>
+<h1 ">该用户已存在</h1>
+<br><br>
+<a href="welcome.html">
+<button style="height:50;wIDth:100;", align="center">返回主页</button></center>
+</a>
+</body>
+</html>
+
+0
+
+.
