@@ -2,7 +2,7 @@ cmake_minimum_required (VERSION 2.8)
 
 project(MyWebServer)
 
-SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/devel/lib)
 
 add_subdirectory(logs)
 
