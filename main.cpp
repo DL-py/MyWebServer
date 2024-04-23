@@ -96,52 +96,52 @@ int main( int argc, char* argv[] )
 
     while( true )
     {
-        int number = epoll_wait( epollfd, events, MAX_EVENT_NUMBER, -1 );
-        if ( ( number < 0 ) && ( errno != EINTR ) )
+        int number = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
+        if ((number < 0) && (errno != EINTR))
         {
             printf( "epoll failure\n" );
             break;
         }
 
-        for ( int i = 0; i < number; i++ )
+        for (int i = 0; i < number; i++)
         {
             int sockfd = events[i].data.fd;
-            if( sockfd == listenfd )
+            if(sockfd == listenfd)
             {
                 struct sockaddr_in client_address;
-                socklen_t client_addrlength = sizeof( client_address );
-                int connfd = accept( listenfd, ( struct sockaddr* )&client_address, &client_addrlength );
+                socklen_t client_addrlength = sizeof(client_address);
+                int connfd = accept(listenfd, (struct sockaddr*)&client_address, &client_addrlength);
                 printf("New connection....  ip: %s , port: %d\n",
-                                    inet_ntoa(client_address.sin_addr),ntohs(client_address.sin_port));
-                if ( connfd < 0 )
+                                    inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+                if (connfd < 0)
                 {
-                    printf( "errno is: %d\n", errno );
+                    printf("errno is: %d\n", errno);
                     continue;
                 }
-                if( http_conn::m_user_count >= MAX_FD ){
-                    show_error( connfd, "Internal server busy" );
+                if(http_conn::m_user_count >= MAX_FD){
+                    show_error(connfd, "Internal server busy");
                     continue;
                 }
-                users[connfd].init( connfd, client_address );
+                users[connfd].init(connfd, client_address);
             }
-            else if( events[i].events & ( EPOLLRDHUP | EPOLLHUP | EPOLLERR ) )
+            else if(events[i].events & ( EPOLLRDHUP | EPOLLHUP | EPOLLERR ))
             {
                 users[sockfd].close_conn();
             }
-            else if( events[i].events & EPOLLIN )
+            else if(events[i].events & EPOLLIN)
             {
-                if( users[sockfd].buffer_read() )
+                if(users[sockfd].buffer_read())
                 {
-                    pool->append( users + sockfd );
+                    pool->append(users + sockfd);
                 }
                 else
                 {
                     users[sockfd].close_conn();
                 }
             }
-            else if( events[i].events & EPOLLOUT )
+            else if(events[i].events & EPOLLOUT)
             {
-                if( !users[sockfd].buffer_write() )
+                if(!users[sockfd].buffer_write())
                 {
                     users[sockfd].close_conn();
                 }
@@ -151,8 +151,8 @@ int main( int argc, char* argv[] )
         }
     }
 
-    close( epollfd );
-    close( listenfd );
+    close(epollfd);
+    close(listenfd);
     delete [] users;
     delete pool;
     return 0;
