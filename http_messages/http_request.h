@@ -2,6 +2,7 @@
 #define HTTP_REQUEST_H
 #include <string>
 #include <unordered_map>
+#include "http_request_method.h"
 
 class HttpRequest
 {

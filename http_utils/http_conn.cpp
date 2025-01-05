@@ -157,4 +157,7 @@ void HttpConn::process()
 
     httpRequestParser.httpRequestParser(httpRequest, httpResponse);
 
+    http_handler* handler = Router::route(httpRequest, httpResponse);
+
+    // handler->handler_pre(httpRequest, httpResponse);
 }

@@ -11,6 +11,8 @@
 #include <sys/epoll.h>
 
 #include "http_request_parser.h"
+#include "../router/router.h"
+#include "../handler/handler.h"
 #include "../http_messages/http_request.h"
 #include "../http_messages/http_response.h"
 #include "../http_messages/http_response_code.h"

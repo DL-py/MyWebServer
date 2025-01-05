@@ -26,3 +26,17 @@ bool HttpRequestMethod::HttpRequestMethodCheck(std::string method)
         return false;
     }
 }
+
+
+HttpRequestMethod::HTTP_REQUEST_METHOD HttpRequestMethod::HttpRequestMethodGet(const std::string& method)
+{
+    auto it = httpRequestMethods_.find(method);
+    if (it != httpRequestMethods_.end())
+    {
+        return it->second;
+    }
+    else
+    {
+        assert(0);
+    }
+}

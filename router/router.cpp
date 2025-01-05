@@ -1,4 +1,4 @@
-#include <router.h>
+#include "router.h"
 
 http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
 {
@@ -43,23 +43,4 @@ http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
     // {
 
     // }
-}
-
-
-http_handler* http_handler_produce(http_com::HTTP_CODE http_code, http_com::METHOD method, char* url, char* content, int content_len)
-{
-    http_handler* handler = nullptr;
-    if (method == http_com::GET)
-    {
-        
-    }
-    else if(method == http_com::POST)
-    {
-        handler = new http_handler_cgi(url, content, content_len);
-    }
-    else
-    {
-        return handler;
-    }
-    return handler;
 }

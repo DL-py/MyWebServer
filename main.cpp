@@ -9,13 +9,19 @@
 #include <stdlib.h>
 #include <cassert>
 #include <sys/epoll.h>
+#include <signal.h>
+#include <sys/types.h>
 
 #include "locker.h"
 #include "threadpool.h"
-#include "http_conn.h"
 #include "ConnPool.h"
-
 #include "./http_utils/http_conn.h"
+#include "./handler/handler.h"
+extern "C"
+{
+#include "./logs/run_log.h"
+}
+
 
 #define MAX_FD 65536
 #define MAX_EVENT_NUMBER 10000
@@ -124,7 +130,7 @@ int main( int argc, char* argv[] )
                     printf("errno is: %d\n", errno);
                     continue;
                 }
-                if(http_conn::m_user_count >= MAX_FD){
+                if(HttpConn::userCount >= MAX_FD){
                     show_error(connfd, "Internal server busy");
                     continue;
                 }
