@@ -4,4 +4,7 @@ const std::unordered_map<HttpResponseCode::HTTP_RESPONSE_CODE, std::string> Http
 {
     {INIT_RESPONSE_CODE, "Init Response Code"},
     {BAD_REQUEST, "Bad Request"},
+    {NO_RESOURCE, "Not Found"},
+    {FORBIDDEN_REQUEST,"Forbidden"},
+    {INTERNAL_ERROR, "Internal Error"},
 };

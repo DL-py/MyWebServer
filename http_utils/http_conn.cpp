@@ -159,5 +159,18 @@ void HttpConn::process()
 
     http_handler* handler = Router::route(httpRequest, httpResponse);
 
-    // handler->handler_pre(httpRequest, httpResponse);
+    if (! handler->handler_pre(httpRequest, httpResponse))
+    {
+        // write response to socket.
+    }
+
+    if (! handler->handler(httpRequest, httpResponse))
+    {
+        // write response to socket.
+    }
+
+    if (! handler->handler_post(httpRequest, httpResponse))
+    {
+        
+    }
 }
