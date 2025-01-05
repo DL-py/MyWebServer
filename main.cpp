@@ -15,6 +15,8 @@
 #include "http_conn.h"
 #include "ConnPool.h"
 
+#include "./http_utils/http_conn.h"
+
 #define MAX_FD 65536
 #define MAX_EVENT_NUMBER 10000
 
@@ -54,17 +56,20 @@ int main( int argc, char* argv[] )
 
     addsig( SIGPIPE, SIG_IGN );
 
-    threadpool< http_conn >* pool = NULL;
+    // threadpool< http_conn >* pool = NULL;
+    threadpool<HttpConn>* pool = NULL;
     try
     {
-        pool = new threadpool< http_conn >;  //创建线程池
+        // pool = new threadpool< http_conn >;  //创建线程池
+        pool  = new threadpool<HttpConn>;
     }
     catch( ... )
     {
         return -1;
     }
 
-    http_conn* users = new http_conn[ MAX_FD ];
+    // http_conn* users = new http_conn[ MAX_FD ];
+    HttpConn* users = new HttpConn[ MAX_FD ];
 
     assert( users );
     int user_count = 0;
@@ -92,7 +97,8 @@ int main( int argc, char* argv[] )
     int epollfd = epoll_create( 5 );
     assert( epollfd != -1 );
     addfd( epollfd, listenfd, false );
-    http_conn::m_epollfd = epollfd;
+    // http_conn::m_epollfd = epollfd;
+    HttpConn::epollfd = epollfd;
 
     while( true )
     {
@@ -122,28 +128,34 @@ int main( int argc, char* argv[] )
                     show_error(connfd, "Internal server busy");
                     continue;
                 }
-                users[connfd].init(connfd, client_address);
+                // users[connfd].init(connfd, client_address);
+                users[connfd].initConn(connfd, client_address);
             }
             else if(events[i].events & ( EPOLLRDHUP | EPOLLHUP | EPOLLERR ))
             {
-                users[sockfd].close_conn();
+                // users[sockfd].close_conn();
+                users[sockfd].closeConn();
             }
             else if(events[i].events & EPOLLIN)
             {
-                if(users[sockfd].buffer_read())
+                // if(users[sockfd].buffer_read())
+                if (users[sockfd].bufferRead())
                 {
                     pool->append(users + sockfd);
                 }
                 else
                 {
-                    users[sockfd].close_conn();
+                    // users[sockfd].close_conn();
+                    users[sockfd].closeConn();
                 }
             }
             else if(events[i].events & EPOLLOUT)
             {
-                if(!users[sockfd].buffer_write())
+                // if(!users[sockfd].buffer_write())
+                if (users[sockfd].bufferWrite()) 
                 {
-                    users[sockfd].close_conn();
+                    // users[sockfd].close_conn();
+                    users[sockfd].closeConn();
                 }
             }
             else

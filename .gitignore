@@ -1,2 +1,7 @@
 *.so
-*/devel/lib/*
+
+build/*
+devel/lib/*
+devel/myhttp
+
+.vscode/*
