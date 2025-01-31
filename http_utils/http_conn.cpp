@@ -67,7 +67,7 @@ void HttpConn::closeConn()
 {
     if(sockfd != -1)
     {
-        removefd(epollfd, sockfd );
+        removefd(epollfd, sockfd);
         sockfd = -1;
         userCount--;
     }
@@ -162,15 +162,45 @@ void HttpConn::process()
     if (! handler->handler_pre(httpRequest, httpResponse))
     {
         // write response to socket.
+        goto response;
     }
 
     if (! handler->handler(httpRequest, httpResponse))
     {
         // write response to socket.
+        goto response;
     }
 
     if (! handler->handler_post(httpRequest, httpResponse))
     {
-        
+        goto response;
     }
+
+    Router::handlerDestory(handler);
+
+response:
+    HttpResponseParser httpResponseParser;
+    httpResponseParser.httpResponseParser(httpRequest, httpResponse);
+
+    const std::string& parseBuffer = httpResponseParser.getParserBuffer();
+
+    writeBuffer = std::move(parseBuffer);
+
+    const std::string conn = httpResponse.getHeader("Connection");
+    if (conn == "keep-alive")
+    {
+        linger = true;
+    }
+
+    modfd(epollfd, sockfd, EPOLLOUT);
+}
+
+void HttpConn::setWritebuffer(std::string& buffer)
+{
+    writeBuffer = std::move(buffer);
+}
+
+const std::string& HttpConn::getWriteBuffer()
+{
+    return writeBuffer;
 }

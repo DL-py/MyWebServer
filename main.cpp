@@ -158,7 +158,7 @@ int main( int argc, char* argv[] )
             else if(events[i].events & EPOLLOUT)
             {
                 // if(!users[sockfd].buffer_write())
-                if (users[sockfd].bufferWrite()) 
+                if (! users[sockfd].bufferWrite()) 
                 {
                     // users[sockfd].close_conn();
                     users[sockfd].closeConn();

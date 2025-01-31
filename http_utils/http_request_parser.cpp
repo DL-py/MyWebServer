@@ -193,7 +193,8 @@ bool HttpRequestParser::parseRequestLine(HttpRequest& req, HttpResponse& resp)
     
     if (!url.empty() && url[0] == '/')
     {
-        req.setURL(url);
+        std::string& url_ = req.getURL();
+        urlDecode(url, url_);
     }
     else
     {
@@ -231,6 +232,10 @@ bool HttpRequestParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
         std::string name = parserLine_.substr(startPos, name_length);
         
         startPos = foundPos + 1;
+        while(startPos < parserLine_.size() && parserLine_[startPos] == ' ')
+        {
+            ++startPos;
+        }
         std::size_t value_length = parserLine_.size() - startPos;
         std::string value = parserLine_.substr(startPos, value_length);
 
@@ -241,6 +246,8 @@ bool HttpRequestParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
         }
 
         req.setHeader(name, value);
+
+        return true;
     }
     else
     {
@@ -252,5 +259,56 @@ bool HttpRequestParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
 bool HttpRequestParser::parseContent(HttpRequest& req, HttpResponse& resp)
 {
     req.setBody(parserLine_);
+    return true;
+}
+
+unsigned char fromHex(char ch)
+{
+    unsigned char val;
+    if (isupper(ch))
+    {
+        val = ch - 'A' + 10;
+    }
+    else if (islower(ch))
+    {
+        val = ch - 'a' + 10;
+    }
+    else if (isdigit(ch))
+    {
+        val = ch - '0';
+    }
+    else
+    {
+        assert(0);
+    }
+    return val;
+}
+
+bool HttpRequestParser::urlDecode(const std::string& encode, std::string& decode)
+{
+    int size = encode.size();
+
+    for(int i = 0; i < size; i++)
+    {
+        if (encode[i] == '+')
+        {
+            decode += ' ';
+        }
+        else if(encode[i] == '%')
+        {
+            if (i + 2 >= size)
+            {
+                return false;
+            }
+            unsigned char high = fromHex(encode[++i]);
+            unsigned char low = fromHex(encode[++i]);
+
+            decode += ((high << 4) + low);
+        }
+        else
+        {
+            decode += encode[i];
+        }
+    }
     return true;
 }

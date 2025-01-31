@@ -36,7 +36,7 @@ void HttpResponse::setStatusCodeAndMessage(int statusCode, std::string statusMes
 }
 
 /*header part*/
-std::string HttpResponse::getHeader(std::string name)
+const std::string HttpResponse::getHeader(std::string name)
 {
     std::string value;
 
@@ -62,8 +62,13 @@ void HttpResponse::setHeader(std::string name, std::string value)
     }
 }
 
+const std::unordered_map<std::string, std::string>& HttpResponse::getHeaders()
+{
+    return headers_;
+}
+
 /*content part*/
-std::string HttpResponse::getBody()
+std::string& HttpResponse::getBody()
 {
     return body_;
 }

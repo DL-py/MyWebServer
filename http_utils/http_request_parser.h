@@ -2,6 +2,7 @@
 #define HTTP_REQUEST_PARSER_H
 #include <cassert>
 #include <cstring>
+#include <cctype>
 #include <string>
 #include <vector>
 #include "../http_messages/http_request.h"
@@ -33,7 +34,9 @@ private:
     bool parseRequestLine(HttpRequest& req, HttpResponse& resp);
     bool parseHeaders(HttpRequest& req, HttpResponse& resp);
     bool parseContent(HttpRequest& req, HttpResponse& resp);
-    
+
+private:
+    bool urlDecode(const std::string& encode, std::string& decode);
 };
 
 

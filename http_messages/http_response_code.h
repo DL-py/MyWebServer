@@ -13,6 +13,7 @@ public:
     enum HTTP_RESPONSE_CODE 
     {
         INIT_RESPONSE_CODE = 000,
+        GOOD_REQUEST = 200,
         BAD_REQUEST = 400,
         FORBIDDEN_REQUEST = 403,
         NO_RESOURCE = 404,

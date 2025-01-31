@@ -11,7 +11,7 @@ void HttpRequest::setMethod(std::string method)
     method_ = method;
 }
 
-std::string HttpRequest::getURL()
+std::string& HttpRequest::getURL()
 {
     return url_;
 }
@@ -32,7 +32,7 @@ void HttpRequest::setVersion(std::string version)
 }
 
 /*header part*/
-std::string HttpRequest::getHeader(std::string name)
+const std::string HttpRequest::getHeader(std::string name)
 {
     std::string value;
 

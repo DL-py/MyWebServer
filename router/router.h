@@ -12,6 +12,7 @@ class Router
 {
 public:
     static http_handler* route(HttpRequest& req, HttpResponse& resp);
+    static void handlerDestory(http_handler* handler);
 
 };
 

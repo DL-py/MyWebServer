@@ -22,13 +22,13 @@ public:
     /*request line part*/
     std::string getMethod();
     void setMethod(std::string method);
-    std::string getURL();
+    std::string& getURL();
     void setURL(std::string url);
     std::string getVersion();
     void setVersion(std::string version);
 
     /*header part*/
-    std::string getHeader(std::string name);
+    const std::string getHeader(std::string name);
     void setHeader(std::string name, std::string value);
 
     /*content part*/

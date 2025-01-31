@@ -5,7 +5,6 @@
 #include <unordered_map>
 
 #include "http_response_code.h"
-
 class HttpResponse
 {
 private:
@@ -29,11 +28,12 @@ public:
     void setStatusCodeAndMessage(int statusCode, std::string statusMessage);
 
     /*header part*/
-    std::string getHeader(std::string name);
+    const std::string getHeader(std::string name);
+    const std::unordered_map<std::string, std::string>& getHeaders();
     void setHeader(std::string name, std::string value);
 
     /*content part*/
-    std::string getBody();
+    std::string& getBody();
     void setBody(std::string body);
 
 };

@@ -52,7 +52,8 @@ bool http_handler_simple::handler(HttpRequest& req, HttpResponse& resp)
     m_file_address = ( char* )mmap( 0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
 
     resp.setBody(std::string(m_file_address, m_file_stat.st_size));
-
+    resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::GOOD_REQUEST);
+    
     close(fd);
     return true;
 }

@@ -30,17 +30,10 @@ http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
             return nullptr;
         }
     }
+}
 
-    // if (method == "GET")
-    // {
-    //     
-    // }
-    // else if (method == "POST")
-    // {
 
-    // }
-    // else
-    // {
-
-    // }
+void Router::handlerDestory(http_handler* handler)
+{
+    delete handler;
 }
