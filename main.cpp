@@ -14,7 +14,6 @@
 
 #include "locker.h"
 #include "threadpool.h"
-#include "ConnPool.h"
 #include "./http_utils/http_conn.h"
 #include "./handler/handler.h"
 extern "C"

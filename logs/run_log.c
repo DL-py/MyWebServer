@@ -83,10 +83,3 @@ void rt_fmt_logging(int type, const char* fmt, ...)
     va_end(args);
     rt_logging(err_buf, type);
 }
-
-// int main()
-// {
-//     rt_log_init();
-//     rt_fmt_logging(RUNLOG_ERROR, "function %s is failed: argv a is %d", "rt_fmt_logging", 20);
-//     rt_log_clean();
-// }
