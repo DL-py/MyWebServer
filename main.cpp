@@ -84,7 +84,7 @@ int main( int argc, char* argv[] )
     assert( listenfd >= 0 );
     struct linger tmp = { 1, 0 };
     setsockopt( listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof( tmp ) );
-    //讲socket与IP地址以及端口好进行绑定:
+    //将socket与IP地址以及端口好进行绑定:
     int ret = 0;
     struct sockaddr_in address;
     bzero( &address, sizeof( address ) );
