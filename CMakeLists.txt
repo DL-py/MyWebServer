@@ -17,7 +17,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -ggdb")
 add_executable(myhttp main.cpp)
 
 target_link_libraries(myhttp  run_log)
-target_link_libraries(myhttp  pthread mysqlclient)
+target_link_libraries(myhttp  pthread)
 target_link_libraries(myhttp  http_utils)
 target_link_libraries(myhttp  http_messages)
 target_link_libraries(myhttp  router)
