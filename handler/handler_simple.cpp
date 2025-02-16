@@ -1,7 +1,5 @@
 #include "handler_simple.h"
 
-// const char* http_handler_simple::doc_root = "./html";
-const char* http_handler_simple::doc_root = "/www/wwwroot/DL-py.github.io";
 
 http_handler_simple::http_handler_simple()
 {
@@ -22,15 +20,15 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
 
     if (strcmp(url, "/") == 0)
     {
-        snprintf(m_real_file, FILENAME_LEN, "%s/%s", doc_root, "index.html");
+        snprintf(m_real_file, FILENAME_LEN, "%s/%s", globalAsset.doc_root, globalAsset.default_page);
     }
     else if (url[len-1] == '/')
     {
-        snprintf(m_real_file, FILENAME_LEN, "%s/%s%s", doc_root, url, "index.html");
+        snprintf(m_real_file, FILENAME_LEN, "%s/%s%s", globalAsset.doc_root, url, globalAsset.default_page);
     }
     else 
     {
-        snprintf(m_real_file, FILENAME_LEN, "%s%s", doc_root, url);
+        snprintf(m_real_file, FILENAME_LEN, "%s%s", globalAsset.doc_root, url);
     }
     
     if (stat( m_real_file, &m_file_stat ) < 0 )

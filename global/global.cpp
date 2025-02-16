@@ -2,3 +2,4 @@
 
 MyConfig globalCFG;
 Logger logger;
+Asset globalAsset;

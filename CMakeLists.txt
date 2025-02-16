@@ -15,10 +15,12 @@ add_subdirectory(http_messages)
 add_subdirectory(router)
 add_subdirectory(handler)
 add_subdirectory(config)
+add_subdirectory(asset)
 
 add_executable(myhttp main.cpp)
 
 target_link_libraries(myhttp  global)
+target_link_libraries(myhttp  asset)
 target_link_libraries(myhttp  run_log)
 target_link_libraries(myhttp  pthread)
 target_link_libraries(myhttp  http_utils)

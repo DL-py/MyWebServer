@@ -19,7 +19,6 @@ class http_handler_simple : public http_handler
 {
 public:
     static const int FILENAME_LEN = 1024;
-    static const char* doc_root;
 public:
     http_handler_simple();
     ~http_handler_simple();

@@ -54,7 +54,6 @@ int main( int argc, char* argv[] )
     const Config& cfg = globalCFG.getConfig();
 
     /* create and initialize logger. */
-    
     if (!logger.initLogger())
     {
         std::cerr << "logger init error." << std::endl;
@@ -62,6 +61,14 @@ int main( int argc, char* argv[] )
     }
     /* print logger information. */
     logger.printLogger();
+
+    /* create and initialize asset. */
+    if (!globalAsset.initAsset())
+    {
+        std::cerr << "asset init error." << std::endl;
+        return -1;
+    }
+    globalAsset.PrintAsset();
 
     pthread_t tid = pthread_self();
     if (pthread_setname_np(tid, "leader") != 0)
