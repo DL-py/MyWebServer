@@ -3,5 +3,6 @@
 build/*
 devel/lib/*
 devel/myhttp
+devel/*.log
 
 .vscode/*
