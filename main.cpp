@@ -14,13 +14,11 @@
 
 #include "locker.h"
 #include "threadpool.h"
+#include "./global/global.hpp"
 #include "./http_utils/http_conn.h"
 #include "./handler/handler.h"
-extern "C"
-{
-#include "./logs/run_log.h"
-}
-
+#include "./config/config.hpp"
+#include "./logs/run_log.hpp"
 
 #define MAX_FD 65536
 #define MAX_EVENT_NUMBER 10000
@@ -43,7 +41,7 @@ void addsig( int sig, void( handler )(int), bool restart = true )
 
 void show_error( int connfd, const char* info )
 {
-    printf( "%s", info );
+    LogRecord(logger, LogLevel::LOG_ERR, "%s\n", info);
     send( connfd, info, strlen( info ), 0 );
     close( connfd );
 }
@@ -51,21 +49,44 @@ void show_error( int connfd, const char* info )
 
 int main( int argc, char* argv[] )
 {
+    /* initialize configuration. */
+    globalCFG.initConfig("./config/common.cfg");
+    const Config& cfg = globalCFG.getConfig();
 
-    if( argc <= 2 )
+    /* create and initialize logger. */
+    
+    if (!logger.initLogger())
     {
-        printf( "usage: %s ip_address port_number\n", basename( argv[0] ) );
+        std::cerr << "logger init error." << std::endl;
         return -1;
     }
-    const char* ip = argv[1];   int port = atoi( argv[2] );
+    /* print logger information. */
+    logger.printLogger();
+
+    pthread_t tid = pthread_self();
+    if (pthread_setname_np(tid, "leader") != 0)
+    {
+        std::cerr << "set thread name: " << "leader" <<" failed." << std::endl;
+    }
+
+    const char* ip = nullptr;
+    int port;
+    try
+    {
+        ip = cfg.lookup("conn.ip");
+        port = cfg.lookup("conn.port");
+    } 
+    catch (const SettingNotFoundException& nfex)
+    {
+        LogRecord(logger, LogLevel::LOG_ERR, "%s is not found in configuration. \n", nfex.getPath());
+        return -1;
+    }
 
     addsig( SIGPIPE, SIG_IGN );
 
-    // threadpool< http_conn >* pool = NULL;
     threadpool<HttpConn>* pool = NULL;
     try
     {
-        // pool = new threadpool< http_conn >;  //创建线程池
         pool  = new threadpool<HttpConn>;
     }
     catch( ... )
@@ -73,18 +94,17 @@ int main( int argc, char* argv[] )
         return -1;
     }
 
-    // http_conn* users = new http_conn[ MAX_FD ];
     HttpConn* users = new HttpConn[ MAX_FD ];
 
     assert( users );
     int user_count = 0;
 
-    rt_log_init();  // log init
     int listenfd = socket( PF_INET, SOCK_STREAM, 0 );
     assert( listenfd >= 0 );
     struct linger tmp = { 1, 0 };
     setsockopt( listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof( tmp ) );
-    //将socket与IP地址以及端口好进行绑定:
+
+    /* bind the socket fd to socket address {IP, port}. */
     int ret = 0;
     struct sockaddr_in address;
     bzero( &address, sizeof( address ) );
@@ -102,7 +122,7 @@ int main( int argc, char* argv[] )
     int epollfd = epoll_create( 5 );
     assert( epollfd != -1 );
     addfd( epollfd, listenfd, false );
-    // http_conn::m_epollfd = epollfd;
+
     HttpConn::epollfd = epollfd;
 
     while( true )
@@ -110,7 +130,7 @@ int main( int argc, char* argv[] )
         int number = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
         if ((number < 0) && (errno != EINTR))
         {
-            printf( "epoll failure\n" );
+            LogRecord(logger, LogLevel::LOG_EMERG, "epoll failed.\n");
             break;
         }
 
@@ -122,44 +142,39 @@ int main( int argc, char* argv[] )
                 struct sockaddr_in client_address;
                 socklen_t client_addrlength = sizeof(client_address);
                 int connfd = accept(listenfd, (struct sockaddr*)&client_address, &client_addrlength);
-                printf("New connection....  ip: %s , port: %d\n",
-                                    inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+                LogRecord(logger, LogLevel::LOG_INFO, "New connection....  ip: %s , port: %d\n", 
+                                  inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
                 if (connfd < 0)
                 {
-                    printf("errno is: %d\n", errno);
+                    LogRecord(logger, LogLevel::LOG_ERR, "New connection error, errno is: %d \n", errno);
                     continue;
                 }
                 if(HttpConn::userCount >= MAX_FD){
                     show_error(connfd, "Internal server busy");
                     continue;
                 }
-                // users[connfd].init(connfd, client_address);
                 users[connfd].initConn(connfd, client_address);
             }
             else if(events[i].events & ( EPOLLRDHUP | EPOLLHUP | EPOLLERR ))
             {
-                // users[sockfd].close_conn();
+                LogRecord(logger, LogLevel::LOG_INFO, "close socket: client close socket active(epoll).\n");
                 users[sockfd].closeConn();
             }
             else if(events[i].events & EPOLLIN)
             {
-                // if(users[sockfd].buffer_read())
                 if (users[sockfd].bufferRead())
                 {
                     pool->append(users + sockfd);
                 }
                 else
                 {
-                    // users[sockfd].close_conn();
                     users[sockfd].closeConn();
                 }
             }
             else if(events[i].events & EPOLLOUT)
             {
-                // if(!users[sockfd].buffer_write())
                 if (! users[sockfd].bufferWrite()) 
                 {
-                    // users[sockfd].close_conn();
                     users[sockfd].closeConn();
                 }
             }
