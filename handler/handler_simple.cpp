@@ -1,7 +1,7 @@
 #include "handler_simple.h"
 
 // const char* http_handler_simple::doc_root = "./html";
-const char* http_handler_simple::doc_root = "/home/dl/DL-py.github.io";
+const char* http_handler_simple::doc_root = "/www/wwwroot/DL-py.github.io";
 
 http_handler_simple::http_handler_simple()
 {
@@ -18,10 +18,10 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
     /* construct m_real_file. */
     const char* url = req.getURL().c_str();
     int len = strlen(url);
-    printf("url:%s\n", url);
+    LogRecord(logger, LogLevel::LOG_DEBUG, "request url: %s.\n", url);
+
     if (strcmp(url, "/") == 0)
     {
-        // snprintf(m_real_file, FILENAME_LEN, "%s%s", doc_root, "/welcome.html");
         snprintf(m_real_file, FILENAME_LEN, "%s/%s", doc_root, "index.html");
     }
     else if (url[len-1] == '/')

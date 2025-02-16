@@ -12,6 +12,7 @@
 #include "handler.h"
 // Linux Header File
 #include <sys/stat.h>
+#include "../global/global.hpp"
 
 
 class http_handler_simple : public http_handler
