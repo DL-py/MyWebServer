@@ -32,6 +32,9 @@ private:
     bool parseContent(HttpRequest& req, HttpResponse& resp);
 
 private:
+    const char* getContentType(const std::string& url);
+
+private:
     ParserState parserState_;
     std::string parserBuffer_;
     char buffer_[BUFFER_SIZE];

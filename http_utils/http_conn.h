@@ -18,7 +18,7 @@
 #include "../http_messages/http_response.h"
 #include "../http_messages/http_response_code.h"
 #include "../http_messages/http_request_method.h"
-
+#include "../global/global.hpp"
 
 class HttpConn
 {
@@ -36,6 +36,7 @@ public:
 private:
     std::string  readBuffer;  // http request buffer
     std::string  writeBuffer; // http response buffer
+    int writePos_;
     int sockfd;
 	sockaddr_in address;
     bool linger;

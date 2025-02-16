@@ -36,6 +36,7 @@ void modfd(int epollfd, int fd, int ev)
 void removefd(int epollfd, int fd)
 {
     epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0);
+    shutdown(fd, SHUT_WR);
     close(fd);
 }
 
@@ -45,12 +46,14 @@ void HttpConn::initConn(int fd, const sockaddr_in& addr)
     sockfd = fd;
     address = addr;
     linger = false;
+    writePos_ = 0;
 
     int error = 0;
     socklen_t len = sizeof( error );
     getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &len);
     int reuse = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
     addfd(epollfd, sockfd, true );
     userCount++;
 }
@@ -59,6 +62,7 @@ void HttpConn::resetConn()
 {
     modfd(epollfd, sockfd, EPOLLIN);
     linger = false;
+    writePos_ = 0;
     readBuffer.clear();
     writeBuffer.clear();
 }
@@ -77,6 +81,7 @@ bool HttpConn::bufferRead()
 {
     if (readBuffer.size() >= HTTP_REQUEST_SIZE)
     {
+        LogRecord(logger, LogLevel::LOG_ALERT, "close socket: readBuffer overflow.\n");
         return false;
     }
 
@@ -91,10 +96,12 @@ bool HttpConn::bufferRead()
             {
                 break;
             }
+            LogRecord(logger, LogLevel::LOG_ERR, "close socket: read data from socket error.\n");
             return false;
         }
         else if ( bytesRead == 0 )
         {
+            LogRecord(logger, LogLevel::LOG_INFO, "close socket: client close socket active(read).\n");
             return false;
         }
 
@@ -106,44 +113,41 @@ bool HttpConn::bufferRead()
 
 bool HttpConn::bufferWrite()
 {
-    int bytesToWrite = writeBuffer.size();
-    int writePos = 0;
+    int writePos = writePos_;
+    int bytesToWrite = writeBuffer.size() - writePos;
+    LogRecord(logger, LogLevel::LOG_DEBUG, "response has %d bytes to be written to socket. \n",  bytesToWrite);
 
     while (1)
     {
         int sendSize = bytesToWrite >= WRITE_BUFFER_SIZE ? WRITE_BUFFER_SIZE : bytesToWrite;
         int ret = send(sockfd, writeBuffer.substr(writePos, sendSize).c_str(), sendSize, 0);
 
+        LogRecord(logger, LogLevel::LOG_DEBUG, "response has %d bytes has been written to socket. \n", ret);
         // send error
         if (ret < 0)  
         {
             if (errno == EAGAIN)
             {
                 modfd(epollfd, sockfd, EPOLLOUT);  // write again
+                LogRecord(logger, LogLevel::LOG_DEBUG, "socket isn't ready to write, now ready to try again. \n");
+                writePos_ = writePos;
                 return true;
             }
 
+            LogRecord(logger, LogLevel::LOG_ERR, "close socket: write data to socket error.\n");
             return false;  // close connection
         }
 
         // send succeed
-        bytesToWrite -=  sendSize;
-        writePos += sendSize;
+        bytesToWrite -=  ret;
+        writePos += ret;
 
+        LogRecord(logger, LogLevel::LOG_DEBUG, "response write pos is %d \n", writePos);
         // send finish
         if (bytesToWrite <= 0)
         {
-            // keep alive, reset for next http request
-            if(linger)
-            {
-                resetConn();
-                return true;
-            }
-            else
-            {
-                // close connection
-                return false;
-            }
+            resetConn();
+            return true;
         }
     }
 

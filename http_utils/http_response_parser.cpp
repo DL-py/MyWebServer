@@ -22,6 +22,63 @@ bool HttpResponseParser::add_response(const char* format, ...)
     return true;
 }
 
+const char* HttpResponseParser::getContentType(const std::string& url)
+{
+    int length = url.size();
+#define SUFFIXLENGTH  6
+    if (length > SUFFIXLENGTH)
+    {
+        const std::string suffix = url.substr(length - SUFFIXLENGTH, SUFFIXLENGTH);
+        if (suffix == ".woff2")
+        {
+            return "font/woff2";
+        }
+    }
+#undef SUFFIXLENGTH
+
+#define SUFFIXLENGTH  5
+    if (length > SUFFIXLENGTH)
+    {
+        const std::string suffix = url.substr(length - SUFFIXLENGTH, SUFFIXLENGTH);
+        if (suffix == ".jpeg")
+        {
+            return "image/jpeg";
+        }
+        else if (suffix == ".webp")
+        {
+            return "image/webp";
+        }
+    }
+#undef SUFFIXLENGTH
+
+#define SUFFIXLENGTH  4
+    if (length > SUFFIXLENGTH)
+    {
+        const std::string suffix = url.substr(length - SUFFIXLENGTH, SUFFIXLENGTH);
+        if (suffix == ".css")
+        {
+            return "text/css";
+        }
+        else if (suffix == ".jpg")
+        {
+            return "image/jpeg";
+        }
+    }
+#undef SUFFIXLENGTH
+
+#define SUFFIXLENGTH  3
+    if (length > SUFFIXLENGTH)
+    {
+        const std::string suffix = url.substr(length - SUFFIXLENGTH, SUFFIXLENGTH);
+        if (suffix == ".js")
+        {
+            return "text/javascript";
+        }
+    }
+#undef SUFFIXLENGTH
+    return nullptr;
+}
+
 bool HttpResponseParser::parseStatusLine(HttpRequest& req, HttpResponse& resp)
 {
     using responseCode = HttpResponseCode::HTTP_RESPONSE_CODE;
@@ -35,6 +92,14 @@ bool HttpResponseParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
 {
     int bodySize = resp.getBody().size();
     resp.setHeader("Content-Length", std::to_string(bodySize));
+
+    const std::string url = req.getURL();
+    /*fontawesome.min.css*/
+    const char* contentType = getContentType(url);
+    if (contentType)
+    {
+        resp.setHeader("content-type", contentType);
+    }
 
     const std::string conn = req.getHeader("Connection");
     if (conn == "keep-alive")
