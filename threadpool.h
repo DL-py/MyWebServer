@@ -3,7 +3,9 @@
 
 #include <list>
 #include <cstdio>
+#include <atomic>
 #include <exception>
+#include <iostream>
 #include <pthread.h>
 #include "locker.h"
 
@@ -18,6 +20,7 @@ public:
 private:
     static void* worker( void* arg );
     void run();
+    bool setThreadName();
 
 private:
     int m_thread_number;
@@ -27,11 +30,14 @@ private:
     locker m_queuelocker;
     sem m_queuestat;
     bool m_stop;
+
+    int counter;
+    locker m_counterlocker;
 };
 
 template< typename T >
 threadpool< T >::threadpool( int thread_number, int max_requests ) : 
-        m_thread_number( thread_number ), m_max_requests( max_requests ), m_stop( false ), m_threads( NULL )
+        m_thread_number( thread_number ), m_max_requests( max_requests ), m_stop( false ), m_threads( NULL ), counter( 0 )
 {
     if( ( thread_number <= 0 ) || ( max_requests <= 0 ) )
     {
@@ -101,6 +107,7 @@ void* threadpool< T >::worker( void* arg )
 template< typename T >
 void threadpool< T >::run()
 {
+    setThreadName();
     while ( ! m_stop )
     {
         m_queuestat.wait();
@@ -119,6 +126,26 @@ void threadpool< T >::run()
         }
         request->process();  /* begin work by execute process function */
     }
+}
+
+template< typename T >
+bool threadpool< T >::setThreadName()
+{
+    static const int maxThreadNameSize = 64;
+    /* set thread name. */
+    char threadName[maxThreadNameSize];
+    m_counterlocker.lock();
+    snprintf(threadName, maxThreadNameSize, "%s-%d", "worker", counter++);
+    m_counterlocker.unlock();
+
+    pthread_t tid = pthread_self();
+    if (pthread_setname_np(tid, threadName) != 0)
+    {
+        std::cerr << "set thread name: " << threadName <<" failed." << std::endl;
+    }
+
+    pthread_getname_np(tid, threadName, maxThreadNameSize);
+    std::cout << "tid: " << tid << "tname: " << threadName << std::endl;
 }
 
 #endif
