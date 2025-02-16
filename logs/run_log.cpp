@@ -1,85 +1,238 @@
-#include "run_log.h"
-static FILE* fp = NULL;
-
-bool rt_log_init()
+#include "run_log.hpp"
+extern MyConfig globalCFG;
+Logger::Logger()
 {
-    fp = fopen(LOG_FILE_PATH, "w+");
-    if (fp == NULL)
+    logFD_ = nullptr;
+    filePath_ = "./log/rtmsg.log";
+    logLevel_ = LogLevel::LOG_INFO;
+    maxLogSize_ = 64 * 1024 * 1024; /* 64MB. */
+    periodTimeOut_ = 10 * 60;  /* 10 minutes. */
+}
+
+Logger::~Logger()
+{
+    if (logFD_)
     {
-        printf("log file:%s open failed.\n", LOG_FILE_PATH);
+        fclose(logFD_);
+    }
+
+    pthread_mutex_destroy(&mutex_);
+}
+
+bool Logger::initLogger()
+{
+    const Config& cfg = globalCFG.getConfig();
+    try
+    {
+        if (cfg.exists("log.log_file_name"))
+        {
+            filePath_ = (const char*)cfg.lookup("log.log_file_name");
+        }
+        
+        if ((logFD_ = fopen(filePath_.c_str(), "w")) == nullptr)
+        {
+            std::cerr<<"open log file "<<filePath_<<" error: "<<strerror(errno)<<std::endl;
+            return false;
+        }
+
+        if (cfg.exists("log.log_level"))
+        {
+            std::string logLevel = cfg.lookup("log.log_level");
+            if (! converStringToLogLevel(logLevel))
+            {
+                std::cerr<<"invalid configration item log.log_level: "<< logLevel << std::endl;
+            }
+        }
+    }
+    catch(const SettingTypeException& tex)
+    {
+        std::cerr<< "invalid configuration type: "<< tex.getPath() << std::endl;
         return false;
     }
+
+    if (!globalCFG.getQuantityValue("log.max_log_size", (int&)maxLogSize_))
+    {
+        std::cerr<< "invalid configuration type: "<< "log.max_log_size" << std::endl;
+        return false;        
+    }
+
+    if (!globalCFG.getTimeValue("log.period_timeout", (int&)periodTimeOut_))
+    {
+        std::cerr<< "invalid configuration type: "<< "log.period_timeout" << std::endl;
+        return false;    
+    }
+
+    pthread_mutex_init(&mutex_, NULL);
+    lastTruncTime_ = time(nullptr);
+
     return true;
 }
 
-bool rt_log_clean()
+void Logger::printLogger()
 {
-    fclose(fp);
+    std::cout << std::left << std::setw(16) << "Logger info: "<<std::endl;
+    std::cout << std::left << std::setw(16) << "log file path: " << filePath_ << std::endl;
+    try
+    {
+        std::cout << std::left << std::setw(16) << "log level: " << converLogLevelToString(logLevel_) << std::endl;
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << '\n';
+    }
+    std::cout << std::left << std::setw(16) << "max log size: " << maxLogSize_ << std::endl;
+    std::cout << std::left << std::setw(16) << "timeout period: " << periodTimeOut_ << std::endl;
 }
 
-int get_timeinfo(char* buf, uint16_t buf_len)
+// bool Logger::logRecord(const LogLevel& level, const char* format, ...)
+// {
+//     va_list args;
+//     va_start(args, format);
+//     logRecord_(level, __FILE__, __func__, __LINE__, format, args);
+//     va_end(args);
+// }
+
+#define LOG_DATE_SIZE  64
+int logmsg_localtime(char* outtime, int outtime_size)
 {
-    time_t cur_time = time(NULL);
-    struct tm * cur_ltime = localtime(&cur_time);
-    int len = snprintf(buf, buf_len, "{%d/%d/%d %d:%d:%d}", (cur_ltime->tm_year+1900), 
-        (cur_ltime->tm_mon+1), cur_ltime->tm_mday, cur_ltime->tm_hour, cur_ltime->tm_min, cur_ltime->tm_sec);
+    time_t now = time(NULL);
+    struct tm time;
+    localtime_r(&now, &time);
+    int len = snprintf(outtime, outtime_size, "%4.4d/%2.2d/%2.2d/%2.2d:%2.2d:%2.2d", time.tm_year+1900, time.tm_mon+1, 
+            time.tm_mday, time.tm_hour, time.tm_min, time.tm_sec);
     return len;
 }
 
-void rt_logging(const char* error, uint8_t log_type)
+bool Logger::logRecord_(const LogLevel& level, const char* file, const char* func, int line, const char* format, ...)
 {
-    char err_buf[RUNLOG_LENGTH_MAX];
-    uint16_t err_buf_len = 0;
-
-    switch (log_type)
+    static const int maxThreadNameSize = 64;
+    if (static_cast<int>(level) > static_cast<int>(logLevel_))
     {
-        case RUNLOG_INFO:
-        {
-            err_buf_len += snprintf(err_buf, RUNLOG_LENGTH_MAX - err_buf_len, "[Info]");
-            break;
-        }
-        case RUNLOG_WARNING:
-        {
-            err_buf_len += snprintf(err_buf, RUNLOG_LENGTH_MAX - err_buf_len, "[Warning]");
-            break;
-        }
-        case RUNLOG_ERROR:
-        {
-            err_buf_len += snprintf(err_buf, RUNLOG_LENGTH_MAX - err_buf_len, "[Error]");
-            break;
-        }
-        default:
-        {
-            break;
-        }    
+        return true;
     }
 
-    err_buf_len += get_timeinfo(err_buf + err_buf_len, RUNLOG_LENGTH_MAX - err_buf_len);
+    va_list args;
+    va_start(args, format);
 
-    err_buf_len += snprintf(err_buf + err_buf_len, RUNLOG_LENGTH_MAX - err_buf_len, " %s.\n", error);
+    pthread_mutex_lock(&mutex_);
+    char curTime[LOG_DATE_SIZE];
+    int len = logmsg_localtime(curTime, LOG_DATE_SIZE);
 
-    if (fwrite(err_buf, err_buf_len, 1, fp) != 1)
+    char threadName[maxThreadNameSize];
+    pthread_t tid = pthread_self();
+    pthread_getname_np(tid, threadName, maxThreadNameSize);
+
+    fprintf(logFD_, "[%s] [%s] [%s|%lu] [%s:%d|%s] ", curTime, converLogLevelToString(level).c_str(), threadName, tid, getFileName(file), line, func);
+    vfprintf(logFD_, format, args);
+    pthread_mutex_unlock(&mutex_);
+
+    va_end(args);
+    fflush(logFD_);
+}
+
+bool Logger::converStringToLogLevel(const std::string& logLevel)
+{
+    if (logLevel == "LOG_EMERG")
     {
-        printf("run time logging failed ! \n");
+        logLevel_ = LogLevel::LOG_EMERG;
+        return true;
+    }
+    else if (logLevel == "LOG_ALERT")
+    {
+        logLevel_ = LogLevel::LOG_ALERT;
+        return true;
+    }
+    else if (logLevel == "LOG_CRIT")
+    {
+        logLevel_ = LogLevel::LOG_CRIT;
+        return true;
+    }
+    else if (logLevel == "LOG_ERR")
+    {
+        logLevel_ = LogLevel::LOG_ERR;
+        return true;        
+    }
+    else if (logLevel == "LOG_WARNING")
+    {
+        logLevel_ = LogLevel::LOG_WARNING;
+        return true;
+    }
+    else if (logLevel == "LOG_NOTICE")
+    {
+        logLevel_ = LogLevel::LOG_NOTICE;
+        return true;
+    }
+    else if (logLevel == "LOG_INFO")
+    {
+        logLevel_ = LogLevel::LOG_INFO;
+        return true;
+    }
+    else if (logLevel == "LOG_DEBUG")
+    {
+        logLevel_ = LogLevel::LOG_DEBUG;
+        return true;
     }
     else
     {
-        fflush(fp);
+        logLevel_ = LogLevel::LOG_INFO;
+        return false;
     }
 }
 
-void rt_fmt_logging(int type, const char* fmt, ...)
+const std::string Logger::converLogLevelToString(const LogLevel& logLevel)
 {
-    va_list args;
-    va_start(args, fmt);
-    char err_buf[RUNLOG_LENGTH_MAX];
-
-    int len = vsnprintf(err_buf, RUNLOG_LENGTH_MAX, fmt, args);
-    if (len <= 0 || len >= RUNLOG_LENGTH_MAX)
+    switch(logLevel)
     {
-        printf("rt_fmt_logging error.\n");
+        case LogLevel::LOG_EMERG:
+        {
+            return "LOG_EMERG";
+        }
+        case LogLevel::LOG_ALERT:
+        {
+            return "LOG_ALERT";
+        }
+        case LogLevel::LOG_CRIT:
+        {
+            return "LOG_CRIT";
+        }
+        case LogLevel::LOG_ERR:
+        {
+            return "LOG_ERR";
+        }
+        case LogLevel::LOG_WARNING:
+        {
+            return "LOG_WARNING";
+        }
+        case LogLevel::LOG_INFO:
+        {
+            return "LOG_INFO";
+        }
+        case LogLevel::LOG_DEBUG:
+        {
+            return "LOG_DEBUG";
+        }
+        default:
+        {
+            throw std::invalid_argument("invalid argument: logLevel");
+        }
+    }
+}
+
+const char* Logger::getFileName(const char* filePath)
+{
+    /**
+     *   /www/wwwroot/MyWebServer/handler/handler_simple.cpp
+     *   ^                               ^                 ^
+     *   |-------------------------------|-----------------|
+     * begin                            pos               end
+    */
+    const char* begin =  filePath;
+    const char* end = begin + strlen(filePath) - 1;
+    char* pos = (char*)end;
+    while(pos >= begin && *pos != '/')
+    {
+        --pos;
     }
 
-    va_end(args);
-    rt_logging(err_buf, type);
+    return (pos >= begin && pos < end) ? (pos + 1) : nullptr;
 }

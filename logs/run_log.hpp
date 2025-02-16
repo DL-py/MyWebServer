@@ -1,23 +1,55 @@
 #ifndef RUN_LOG_H
 #define RUN_LOG_H
 #include <stdio.h>
-#include <string.h>
+#include <cstring>
 #include <time.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <pthread.h>
+#include <errno.h>
+#include <string>
+#include <iostream>
+#include <iomanip>
+#include <exception>
+#include "../config/config.hpp"
+enum class LogLevel
+{
+    LOG_EMERG,
+    LOG_ALERT,
+    LOG_CRIT,
+    LOG_ERR,
+    LOG_WARNING,
+    LOG_NOTICE,
+    LOG_INFO,
+    LOG_DEBUG
+};
 
-#define RUNLOG_INFO     0
-#define RUNLOG_WARNING  1
-#define RUNLOG_ERROR    2
+class Logger
+{
+public:
+    Logger();
+    ~Logger();
+private:
+    FILE* logFD_;
+    std::string filePath_;
+    LogLevel logLevel_;
+    pthread_mutex_t mutex_;
 
-#define LOG_FILE_PATH  "./run_time.log"
+    uint64_t  maxLogSize_;
+    time_t lastTruncTime_;
+    time_t periodTimeOut_;
+public:
+    bool initLogger();
+    void printLogger();
+    bool logRecord_(const LogLevel& level, const char* file, const char* func, int line, const char* format, ...);
 
-#define RUNLOG_LENGTH_MAX 65536 
+private:
+    bool converStringToLogLevel(const std::string& logLevel);
+    const std::string converLogLevelToString(const LogLevel& logLevel);
 
+    const char* getFileName(const char* filePath);
+};
 
-bool rt_log_init();
-bool rt_log_clean();
-void rt_logging(const char* error, uint8_t log_type);
-void rt_fmt_logging(int type, const char* fmt, ...);
+#define LogRecord(logger, level, format, ...) (logger).logRecord_((level), __FILE__, __func__, __LINE__, (format), ##__VA_ARGS__)
 #endif
