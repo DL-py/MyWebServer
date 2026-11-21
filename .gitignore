@@ -1,7 +1,8 @@
 *.so
 
-build/*
-devel/*
+build/
+devel/
+etc/common.cfg
 .vscode/*
 
 superpowers/

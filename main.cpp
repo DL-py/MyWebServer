@@ -46,11 +46,57 @@ void show_error( int connfd, const char* info )
     close( connfd );
 }
 
+static void print_usage( const char* prog )
+{
+    std::cerr << "usage: " << prog << " [--config <path>]" << std::endl;
+    std::cerr << "  or set MYHTTP_CONFIG." << std::endl;
+}
+
+static bool resolve_config_path( int argc, char* argv[], std::string& path )
+{
+    const char* env_path = getenv( "MYHTTP_CONFIG" );
+    path = ( env_path != NULL && env_path[0] != '\0' ) ? env_path : "../etc/common.cfg";
+
+    for ( int i = 1; i < argc; ++i )
+    {
+        if ( strcmp( argv[i], "--config" ) == 0 )
+        {
+            if ( i + 1 >= argc )
+            {
+                std::cerr << "--config requires a path" << std::endl;
+                return false;
+            }
+            path = argv[++i];
+        }
+        else if ( strncmp( argv[i], "--config=", 9 ) == 0 )
+        {
+            path = argv[i] + 9;
+        }
+        else
+        {
+            std::cerr << "unknown argument: " << argv[i] << std::endl;
+            return false;
+        }
+    }
+    return true;
+}
+
 
 int main( int argc, char* argv[] )
 {
     /* initialize configuration. */
-    globalCFG.initConfig("./config/common.cfg");
+    std::string configPath;
+    if ( !resolve_config_path( argc, argv, configPath ) )
+    {
+        print_usage( argv[0] );
+        return -1;
+    }
+
+    if ( globalCFG.initConfig( configPath ) != 0 )
+    {
+        std::cerr << "failed to load config: " << configPath << std::endl;
+        return -1;
+    }
     const Config& cfg = globalCFG.getConfig();
 
     /* create and initialize logger. */
