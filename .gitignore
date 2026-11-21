@@ -1,8 +1,8 @@
 *.so
 
 build/*
-devel/lib/*
-devel/myhttp
-devel/*.log
-
+devel/*
 .vscode/*
+
+superpowers/
+.superpowers
