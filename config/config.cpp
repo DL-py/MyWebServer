@@ -14,7 +14,7 @@ int MyConfig::initConfig(const std::string& filename)
 {
     try
     {
-        cfg.readFile(filename);
+        cfg.readFile(filename.c_str());
     }
     catch(const FileIOException &fioex)
     {
@@ -50,7 +50,7 @@ bool MyConfig::getQuantityValue(const char* path, int& value)
         value = setting;
         return true;
     }
-    else if (setting.isString())
+    else if (setting.getType() == Setting::TypeString)
     {
         if (! getValueFromQuantityString(setting, value))
         {
@@ -78,7 +78,7 @@ bool MyConfig::getTimeValue(const char* path, int& value)
         value = setting;
         return true;
     }
-    else if (setting.isString())
+    else if (setting.getType() == Setting::TypeString)
     {
         if (! getValueFromTimeString(setting, value))
         {

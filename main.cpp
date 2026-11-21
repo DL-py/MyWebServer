@@ -111,6 +111,10 @@ int main( int argc, char* argv[] )
     struct linger tmp = { 1, 0 };
     setsockopt( listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof( tmp ) );
 
+    /* allow restart while old connections are in TIME_WAIT. */
+    int reuse = 1;
+    setsockopt( listenfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof( reuse ) );
+
     /* bind the socket fd to socket address {IP, port}. */
     int ret = 0;
     struct sockaddr_in address;
@@ -120,10 +124,26 @@ int main( int argc, char* argv[] )
     address.sin_port = htons( port );
 
     ret = bind( listenfd, ( struct sockaddr* )&address, sizeof( address ) );
-    assert( ret >= 0 );
+    if (ret < 0)
+    {
+        LogRecord(logger, LogLevel::LOG_ERR, "bind %s:%d failed: %s (errno=%d)\n",
+                  ip, port, strerror(errno), errno);
+        std::cerr << "bind " << ip << ":" << port << " failed: " << strerror(errno)
+                  << " (errno=" << errno << "). Is another instance already running?" << std::endl;
+        close( listenfd );
+        return -1;
+    }
 
     ret = listen( listenfd, 5 );
-    assert( ret >= 0 );
+    if (ret < 0)
+    {
+        LogRecord(logger, LogLevel::LOG_ERR, "listen on %s:%d failed: %s (errno=%d)\n",
+                  ip, port, strerror(errno), errno);
+        std::cerr << "listen on " << ip << ":" << port << " failed: " << strerror(errno)
+                  << " (errno=" << errno << ")." << std::endl;
+        close( listenfd );
+        return -1;
+    }
 
     epoll_event events[ MAX_EVENT_NUMBER ];
     int epollfd = epoll_create( 5 );
