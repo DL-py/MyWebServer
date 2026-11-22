@@ -27,9 +27,9 @@ bool HttpRequestParser::httpRequestParser(HttpRequest& req, HttpResponse& resp)
                 {
                     std::string contentLengthString = req.getHeader("Content-Length");
                     
-                    if (contentLengthString.empty())
+                    if (contentLengthString.empty() || contentLengthString == "0")
                     {
-                        return true;
+                        return true;  // 无 body 或 Content-Length: 0，body 保持空串
                     }
                     else
                     {
@@ -51,6 +51,7 @@ bool HttpRequestParser::httpRequestParser(HttpRequest& req, HttpResponse& resp)
                 {
                     return false;
                 }
+                return true;  // body 已按 Content-Length 读完，不要再进 getOneLine
             }
             break;
             default:
