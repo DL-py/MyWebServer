@@ -1,4 +1,5 @@
 #include "handler_cgi.h"
+#include "cgi_exec_args.h"
 
 #include "../global/global.hpp"
 
@@ -158,6 +159,10 @@ bool http_handler_cgi::execute(HttpRequest& req, HttpResponse& resp, std::string
     setNonBlocking(pipeParentToChild[1]);
     setNonBlocking(pipeChildToParent[0]);
 
+    // All heap allocation happens before fork(). The child only performs
+    // async-signal-safe calls before execve().
+    CgiExecArgs execArgs = buildCgiExecArgs(m_scriptPath, method, contentLength);
+
     pid_t childPid = fork();
     if (childPid < 0)
     {
@@ -180,28 +185,7 @@ bool http_handler_cgi::execute(HttpRequest& req, HttpResponse& resp, std::string
         close(pipeParentToChild[0]);
         close(pipeChildToParent[1]);
 
-        std::vector<std::string> envStrings;
-        envStrings.push_back("CONTENT_LENGTH=" + contentLength);
-        envStrings.push_back("REQUEST_METHOD=" + method);
-        envStrings.push_back("Is_Repeat=0");
-        envStrings.push_back("IsCorrect=0");
-        envStrings.push_back("LANG=C.UTF-8");
-        envStrings.push_back("PYTHONIOENCODING=utf-8");
-
-        std::vector<char*> envp;
-        for (size_t i = 0; i < envStrings.size(); ++i)
-        {
-            envp.push_back(const_cast<char*>(envStrings[i].c_str()));
-        }
-        envp.push_back(NULL);
-
-        char* argv[] = {
-            const_cast<char*>(m_scriptPath.c_str()),
-            const_cast<char*>(contentLength.c_str()),
-            NULL
-        };
-
-        execve(m_scriptPath.c_str(), argv, &envp[0]);
+        execve(m_scriptPath.c_str(), &execArgs.argv[0], &execArgs.envp[0]);
         _exit(127);
     }
 

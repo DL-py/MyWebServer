@@ -6,4 +6,4 @@ SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/devel/lib/${CUR_DIR})
 set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -ggdb")
 
-add_library(http_hanlder SHARED handler.cpp handler_simple.cpp handler_cgi.cpp)
+add_library(http_hanlder SHARED handler.cpp handler_simple.cpp handler_cgi.cpp cgi_exec_args.cpp)
