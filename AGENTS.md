@@ -21,12 +21,17 @@ bash tests/cgi_integration.sh
 g++ -std=c++11 -I. tests/cgi_exec_args_test.cpp handler/cgi_exec_args.cpp -o /tmp/cgi_exec_args_test && /tmp/cgi_exec_args_test
 ```
 
-新环境重配（本机无系统 libconfig++，仅 `devel/lib/vendor/`，该目录被 git 忽略）：
+系统依赖（Ubuntu）：
 
 ```bash
-cmake -S . -B build \
-  -DCMAKE_CXX_FLAGS=-I$PWD/devel/lib/vendor/include \
-  -DCMAKE_EXE_LINKER_FLAGS=-L$PWD/devel/lib/vendor
+sudo apt-get install -y build-essential cmake libconfig++-dev libconfig-dev libmysqlclient-dev libssl-dev
+```
+
+首次构建：
+
+```bash
+cmake -S . -B build
+cmake --build build -j4
 ```
 
 查看/结束服务（进程名为 `leader`）：

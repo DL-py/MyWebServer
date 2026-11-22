@@ -9,23 +9,23 @@
 - `shells/`：服务启动脚本（`start-server.sh`）
 - `sql/`：建库建表脚本
 - `docs/`：项目文档（`MyWebServer.md`）
-- `reference/`：旧参考实现，不参与构建
 - `superpowers/`：中间设计与计划（git 忽略）
 - `build/`：构建目录（git 忽略）
 - `devel/`：可执行文件、库与本地运行配置（`devel/common.cfg`，git 忽略）
 
 ## 构建
 
+Ubuntu 依赖：
+
 ```bash
-cmake --build build -j4
+sudo apt-get install -y build-essential cmake libconfig++-dev libconfig-dev libmysqlclient-dev libssl-dev
 ```
 
-新环境先配置（本机无系统 libconfig++，使用 `devel/lib/vendor/`）：
+首次配置与构建：
 
 ```bash
-cmake -S . -B build \
-  -DCMAKE_CXX_FLAGS=-I$PWD/devel/lib/vendor/include \
-  -DCMAKE_EXE_LINKER_FLAGS=-L$PWD/devel/lib/vendor
+cmake -S . -B build
+cmake --build build -j4
 ```
 
 ## 运行

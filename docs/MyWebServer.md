@@ -529,7 +529,6 @@ extern Asset globalAsset;     // 全局资源
 | `http_utils/` | HTTP 连接管理与 Epoll 工具函数 |
 | `router/` | 基于请求方法的路由分发 |
 | `handler/` | 业务处理器（静态资源、CGI 等） |
-| `refer/` | 参考实现与待开发模块 |
 | `docs/` | 项目文档 |
 
 ---
