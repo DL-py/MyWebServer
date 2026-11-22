@@ -17,3 +17,13 @@ asset =
   doc_root = "../web";
   default_page = "welcome.html";
 }
+
+db =
+{
+  host = "127.0.0.1";
+  port = 3306;
+  user = "myweb";
+  password = "change-me";
+  name = "mywebserver";
+  pool_size = 8;
+};

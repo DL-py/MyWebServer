@@ -7,3 +7,4 @@ set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -ggdb")
 
 add_library(global SHARED global.cpp)
+target_link_libraries(global auth)

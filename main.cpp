@@ -14,6 +14,8 @@
 
 #include "locker.h"
 #include "threadpool.h"
+#include "db/db_pool.h"
+#include <mysql.h>
 #include "./global/global.hpp"
 #include "./http_utils/http_conn.h"
 #include "./handler/handler.h"
@@ -115,6 +117,65 @@ int main( int argc, char* argv[] )
         return -1;
     }
     globalAsset.PrintAsset();
+
+    /* initialize mysql client library and connection pool. */
+    if (mysql_library_init(0, NULL, NULL) != 0)
+    {
+        std::cerr << "mysql library init error." << std::endl;
+        return -1;
+    }
+    DbConfig dbConfig;
+    try
+    {
+        dbConfig.host = (const char*)cfg.lookup("db.host");
+        dbConfig.port = cfg.lookup("db.port");
+        dbConfig.user = (const char*)cfg.lookup("db.user");
+        dbConfig.password = (const char*)cfg.lookup("db.password");
+        dbConfig.name = (const char*)cfg.lookup("db.name");
+        dbConfig.poolSize = cfg.lookup("db.pool_size");
+    }
+    catch (const SettingNotFoundException& nfex)
+    {
+        LogRecord(logger, LogLevel::LOG_ERR, "%s is not found in configuration. \n", nfex.getPath());
+        mysql_library_end();
+        return -1;
+    }
+    try
+    {
+        globalDbPool = makeMysqlPool(dbConfig);
+    }
+    catch (const std::exception& e)
+    {
+        LogRecord(logger, LogLevel::LOG_ERR, "database pool init failed: %s\n", e.what());
+        mysql_library_end();
+        return -1;
+    }
+
+    /* startup self-check: the user table must exist. */
+    {
+        MYSQL* conn = globalDbPool->acquire();
+        MYSQL_STMT* stmt = mysql_stmt_init(conn);
+        bool ok = false;
+        const char* checkSql = "SELECT 1 FROM user_basic_info LIMIT 1";
+        if (stmt && mysql_stmt_prepare(stmt, checkSql, strlen(checkSql)) == 0 &&
+            mysql_stmt_execute(stmt) == 0)
+        {
+            ok = true;
+        }
+        std::string err = stmt ? mysql_stmt_error(stmt) : "mysql_stmt_init failed";
+        if (stmt) mysql_stmt_close(stmt);
+        globalDbPool->release(conn);
+        if (!ok)
+        {
+            LogRecord(logger, LogLevel::LOG_ERR, "database table check failed: %s\n", err.c_str());
+            delete globalDbPool;
+            globalDbPool = nullptr;
+            mysql_library_end();
+            return -1;
+        }
+    }
+    LogRecord(logger, LogLevel::LOG_INFO, "database pool ready: %s/%s\n",
+              dbConfig.host.c_str(), dbConfig.name.c_str());
 
     pthread_t tid = pthread_self();
     if (pthread_setname_np(tid, "leader") != 0)
@@ -260,5 +321,8 @@ int main( int argc, char* argv[] )
     close(listenfd);
     delete [] users;
     delete pool;
+    delete globalDbPool;
+    globalDbPool = nullptr;
+    mysql_library_end();
     return 0;
 }
