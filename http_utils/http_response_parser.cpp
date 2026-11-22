@@ -63,6 +63,10 @@ const char* HttpResponseParser::getContentType(const std::string& url)
         {
             return "image/jpeg";
         }
+        else if (suffix == ".ico")
+        {
+            return "image/x-icon";
+        }
     }
 #undef SUFFIXLENGTH
 
