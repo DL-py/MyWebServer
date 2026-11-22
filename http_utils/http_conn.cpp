@@ -163,24 +163,18 @@ void HttpConn::process()
 
     http_handler* handler = Router::route(httpRequest, httpResponse);
 
-    if (! handler->handler_pre(httpRequest, httpResponse))
+    if (handler != nullptr)
     {
-        // write response to socket.
-        goto response;
-    }
+        if (handler->handler_pre(httpRequest, httpResponse))
+        {
+            if (handler->handler(httpRequest, httpResponse))
+            {
+                handler->handler_post(httpRequest, httpResponse);
+            }
+        }
 
-    if (! handler->handler(httpRequest, httpResponse))
-    {
-        // write response to socket.
-        goto response;
+        Router::handlerDestory(handler);
     }
-
-    if (! handler->handler_post(httpRequest, httpResponse))
-    {
-        goto response;
-    }
-
-    Router::handlerDestory(handler);
 
 response:
     HttpResponseParser httpResponseParser;
