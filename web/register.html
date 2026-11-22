@@ -11,14 +11,18 @@
 		<section class="card card--wide">
 			<h1 class="title">注册</h1>
 			<p class="subtitle">填写下面的信息完成注册</p>
-			<form class="form" action="register.cgi" method="POST">
+			<form class="form" action="/api/auth/register" method="POST">
 				<div class="field">
 					<label for="user">账号</label>
-					<input class="input" type="text" id="user" name="user" maxlength="11" autocomplete="username" required>
+					<input class="input" type="text" id="user" name="user" maxlength="32" autocomplete="username" required>
 				</div>
 				<div class="field">
 					<label for="password">密码</label>
 					<input class="input" type="password" id="password" name="password" autocomplete="new-password" required>
+				</div>
+				<div class="field">
+					<label for="confirm">确认密码</label>
+					<input class="input" type="password" id="confirm" name="confirm" autocomplete="new-password" required>
 				</div>
 				<div class="grid">
 					<div class="field">
