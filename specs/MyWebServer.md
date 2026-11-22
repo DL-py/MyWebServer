@@ -24,7 +24,7 @@ MyWebServer 是一个基于 **C/C++** 实现的轻量级 HTTP 服务器，旨在
 | 配置管理 | 基于 libconfig 的结构化配置 |
 | 路由管理 | 基于请求方法的路由分发 |
 | 静态资源 | 支持 HTML/CSS/JS/图片等静态文件服务（mmap 零拷贝） |
-| CGI 扩展 | 支持 Python CGI 脚本（设计阶段） |
+| CGI 扩展 | 支持 Python CGI 脚本（已实现） |
 | 用户管理 | MySQL 数据库 + SHA-256 加盐哈希（设计阶段） |
 | 日志系统 | 多级别运行时日志，支持日志截断 |
 
@@ -310,17 +310,24 @@ handler_post() → munmap 释放映射
 - 支持默认首页（`index.html`）
 - 文件路径长度限制：1024 字节
 
-#### 3.4.3 http_handler_cgi — CGI 脚本处理（设计阶段）
+#### 3.4.3 http_handler_cgi — CGI 脚本处理（已实现）
 
-支持 Python CGI 脚本执行：
+在线程池工作线程中通过 `fork + execve` 执行 `doc_root` 下的 Python CGI 脚本：
 
 ```
-设计思路：
-  1. 创建工作线程处理 CGI 请求
-  2. 权限判断（文件存在、可执行）
-  3. 通过管道/IPC 将 HTTP 请求体传至 CGI 脚本
-  4. 获取脚本输出作为 HTTP 响应体
+实现流程：
+  1. Router 按 URL 后缀 .cgi 选择 CGI 处理器（GET/POST）
+  2. realpath 规范化路径，拒绝 doc_root 之外的脚本
+  3. 检查普通文件与可执行位，失败返回 404/403/400
+  4. 两根管道 + poll() 并发传输请求体与脚本 stdout，避免大 body 死锁
+  5. 通过 envp 传入 CONTENT_LENGTH、REQUEST_METHOD、Is_Repeat=0、
+     IsCorrect=0、LANG=C.UTF-8、PYTHONIOENCODING=utf-8
+  6. 剥离可选的 CGI 响应头，其余作为响应体，默认 Content-Type
+     text/html; charset=utf-8
+  7. 超时 5000ms、输出上限 1MB、子进程非零退出均返回 500
 ```
+
+`Is_Repeat` 和 `IsCorrect` 是现有脚本依赖的用户管理占位变量；用户管理模块尚未实现，因此固定为 `0`。
 
 #### 3.4.4 用户管理处理（设计阶段）
 
@@ -538,7 +545,7 @@ extern Asset globalAsset;     // 全局资源
 | mmap | 零拷贝文件传输 |
 | libconfig | 结构化配置解析 |
 | MySQL | 用户数据持久化（设计阶段） |
-| Python | CGI 脚本语言（设计阶段） |
+| Python | CGI 脚本语言（已实现） |
 | SHA-256 | 密码哈希算法 |
 | Postman | API 测试与压力测试 |
 
@@ -584,7 +591,7 @@ extern Asset globalAsset;     // 全局资源
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| CGI 支持 | 设计完成 | Python 脚本处理，通过 IPC 传输 HTTP 请求体 |
+| CGI 支持 | 已实现 | Python 脚本处理，通过管道传输 HTTP 请求体 |
 | 用户管理 | 设计完成 | MySQL + SHA-256，支持注册/登录/注销/信息修改 |
 | Gzip 压缩 | 需求确认 | 支持 gzip 传输格式，优化传输性能 |
 | 异常处理 | 需求确认 | 统一异常处理逻辑（资源不存在、无权限等） |
