@@ -14,9 +14,13 @@ public:
     {
         INIT_RESPONSE_CODE = 000,
         GOOD_REQUEST = 200,
+        MOVED_TEMPORARILY = 302,
         BAD_REQUEST = 400,
+        UNAUTHORIZED = 401,
         FORBIDDEN_REQUEST = 403,
         NO_RESOURCE = 404,
+        METHOD_NOT_ALLOWED = 405,
+        CONFLICT = 409,
         INTERNAL_ERROR = 500,
     };
 
