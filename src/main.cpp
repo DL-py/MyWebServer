@@ -57,7 +57,7 @@ static void print_usage( const char* prog )
 static bool resolve_config_path( int argc, char* argv[], std::string& path )
 {
     const char* env_path = getenv( "MYHTTP_CONFIG" );
-    path = ( env_path != NULL && env_path[0] != '\0' ) ? env_path : "../etc/common.cfg";
+    path = ( env_path != NULL && env_path[0] != '\0' ) ? env_path : "common.cfg";
 
     for ( int i = 1; i < argc; ++i )
     {

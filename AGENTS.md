@@ -11,7 +11,7 @@ cmake --build build -j4
 启动（仓库根目录）：
 
 ```bash
-./run.sh
+./shells/start-server.sh
 ```
 
 验证：

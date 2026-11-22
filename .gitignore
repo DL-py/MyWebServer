@@ -1,9 +1,19 @@
+# 构建产物
+/build/
+/devel/
+*.o
+*.a
 *.so
 
-build/
-devel/
-etc/common.cfg
-.vscode/*
+# 中间设计与计划文档
+/superpowers/
+/.superpowers/
 
-superpowers/
-.superpowers
+# 编辑器与系统文件
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# 日志
+*.log
