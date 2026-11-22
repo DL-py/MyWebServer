@@ -1,6 +1,7 @@
 #include "router.h"
 
 #include "../handler/handler_cgi.h"
+#include "../handler/user_handler.h"
 
 http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
 {
@@ -21,6 +22,11 @@ http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
         url.erase(queryPos);
     }
     const bool isCgi = url.size() >= 4 && url.compare(url.size() - 4, 4, ".cgi") == 0;
+
+    if (url.rfind("/api/auth/", 0) == 0)
+    {
+        return new http_user_handler();
+    }
 
     http_handler* handler = nullptr;
     switch (method)
