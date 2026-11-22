@@ -19,6 +19,8 @@ private:
     std::string body_;
 
 public:
+    HttpResponse();
+
     /*status line part*/
     int getStatusCode();
     void setStatusCode(int statusCode);

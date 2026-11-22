@@ -1,5 +1,10 @@
 #include "http_response.h"
 
+HttpResponse::HttpResponse()
+{
+    setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::INTERNAL_ERROR);
+}
+
 /*status line part*/
 int HttpResponse::getStatusCode()
 {
