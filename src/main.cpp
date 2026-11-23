@@ -118,6 +118,17 @@ int main( int argc, char* argv[] )
     }
     globalAsset.PrintAsset();
 
+    bool dbEnabled = false;
+    if (cfg.exists("db.enabled"))
+    {
+        dbEnabled = (bool)cfg.lookup("db.enabled");
+    }
+    if (!dbEnabled)
+    {
+        LogRecord(logger, LogLevel::LOG_WARNING, "database disabled, skip pool init.\n");
+    }
+    else
+    {
     /* initialize mysql client library and connection pool. */
     if (mysql_library_init(0, NULL, NULL) != 0)
     {
@@ -176,6 +187,7 @@ int main( int argc, char* argv[] )
     }
     LogRecord(logger, LogLevel::LOG_INFO, "database pool ready: %s/%s\n",
               dbConfig.host.c_str(), dbConfig.name.c_str());
+    }
 
     pthread_t tid = pthread_self();
     if (pthread_setname_np(tid, "leader") != 0)

@@ -14,12 +14,13 @@ log =
 
 asset = 
 {
-  doc_root = "../web";
-  default_page = "welcome.html";
+  doc_root = "/home/dl/DL-py.github.io";
+  default_page = "index.html";
 }
 
 db =
 {
+  enabled = false;
   host = "127.0.0.1";
   port = 3306;
   user = "myweb";

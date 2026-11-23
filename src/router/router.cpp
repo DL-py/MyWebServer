@@ -2,6 +2,7 @@
 
 #include "../handler/handler_cgi.h"
 #include "../handler/user_handler.h"
+#include "../global/global.hpp"
 
 http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
 {
@@ -25,6 +26,11 @@ http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
 
     if (url.rfind("/api/auth/", 0) == 0)
     {
+        if (globalDbPool == nullptr)
+        {
+            resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::SERVICE_UNAVAILABLE);
+            return nullptr;
+        }
         return new http_user_handler();
     }
 

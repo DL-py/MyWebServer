@@ -4,6 +4,7 @@ const std::unordered_map<HttpResponseCode::HTTP_RESPONSE_CODE, std::string> Http
 {
     {INIT_RESPONSE_CODE, "Init Response Code"},
     {GOOD_REQUEST, "OK"},
+    {MOVED_PERMANENTLY, "Moved Permanently"},
     {MOVED_TEMPORARILY, "Found"},
     {BAD_REQUEST, "Bad Request"},
     {UNAUTHORIZED, "Unauthorized"},
@@ -12,4 +13,5 @@ const std::unordered_map<HttpResponseCode::HTTP_RESPONSE_CODE, std::string> Http
     {METHOD_NOT_ALLOWED, "Method Not Allowed"},
     {CONFLICT, "Conflict"},
     {INTERNAL_ERROR, "Internal Error"},
+    {SERVICE_UNAVAILABLE, "Service Unavailable"},
 };

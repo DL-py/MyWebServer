@@ -14,6 +14,7 @@ public:
     {
         INIT_RESPONSE_CODE = 000,
         GOOD_REQUEST = 200,
+        MOVED_PERMANENTLY = 301,
         MOVED_TEMPORARILY = 302,
         BAD_REQUEST = 400,
         UNAUTHORIZED = 401,
@@ -22,6 +23,7 @@ public:
         METHOD_NOT_ALLOWED = 405,
         CONFLICT = 409,
         INTERNAL_ERROR = 500,
+        SERVICE_UNAVAILABLE = 503,
     };
 
     const static std::unordered_map<HTTP_RESPONSE_CODE, std::string> httpResponseCodeInfo;

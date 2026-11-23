@@ -29,6 +29,7 @@ public:
 
 private:
     char m_real_file[FILENAME_LEN];
+    bool m_not_found;
     char * m_file_address;
     struct stat m_file_stat;
 
