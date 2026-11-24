@@ -26,15 +26,21 @@ bool HttpResponseParser::parseStatusLine(HttpRequest& req, HttpResponse& resp)
 {
     using responseCode = HttpResponseCode::HTTP_RESPONSE_CODE;
     responseCode statusCode = (responseCode)resp.getStatusCode();
-    const char* responseTitle = resp.getStatusMessage().c_str();
+    const std::string responseTitle = resp.getStatusMessage();
 
-    add_response("%s %d %s\r\n", "HTTP/1.1", (int)statusCode, responseTitle);
+    add_response("%s %d %s\r\n", "HTTP/1.1", (int)statusCode, responseTitle.c_str());
+    return true;
 }
 
 bool HttpResponseParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
 {
     int bodySize = resp.getBody().size();
-    resp.setHeader("Content-Length", std::to_string(bodySize));
+    /* RFC 9110 8.6: a 304 must not carry a Content-Length unless it equals
+       the length of the 200 body; omit it instead. */
+    if (resp.getStatusCode() != 304 && resp.getHeader("Content-Length").empty())
+    {
+        resp.setHeader("Content-Length", std::to_string(bodySize));
+    }
 
     const std::string conn = req.getHeader("Connection");
     if (conn == "keep-alive")
@@ -55,6 +61,7 @@ bool HttpResponseParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
 
     /*add final blank line. */
     add_response("%s", "\r\n");
+    return true;
 }
 
 bool HttpResponseParser::parseContent(HttpRequest& req, HttpResponse& resp)

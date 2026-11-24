@@ -1,5 +1,21 @@
 #include "http_request.h"
 
+#include <cctype>
+
+namespace
+{
+/* HTTP field names are case-insensitive (RFC 9110 5.1). */
+std::string normalizeHeaderName(const std::string& name)
+{
+    std::string normalized = name;
+    for (std::size_t i = 0; i < normalized.size(); ++i)
+    {
+        normalized[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(normalized[i])));
+    }
+    return normalized;
+}
+}  // namespace
+
 /*request line part*/
 std::string HttpRequest::getMethod()
 {
@@ -36,7 +52,7 @@ const std::string HttpRequest::getHeader(std::string name)
 {
     std::string value;
 
-    auto it = headers_.find(name);
+    auto it = headers_.find(normalizeHeaderName(name));
     if (it != headers_.end())
     {
         value =  it->second;
@@ -51,10 +67,11 @@ const std::string HttpRequest::getHeader(std::string name)
 
 void HttpRequest::setHeader(std::string name, std::string value)
 {
-    auto it = headers_.find(name);
+    const std::string key = normalizeHeaderName(name);
+    auto it = headers_.find(key);
     if (it == headers_.end())
     {
-        headers_[name] = value;
+        headers_[key] = value;
     }
 }
 

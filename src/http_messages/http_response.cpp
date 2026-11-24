@@ -60,11 +60,7 @@ const std::string HttpResponse::getHeader(std::string name)
 
 void HttpResponse::setHeader(std::string name, std::string value)
 {
-    auto it = headers_.find(name);
-    if (it == headers_.end())
-    {
-        headers_[name] = value;
-    }
+    headers_[name] = value;
 }
 
 const std::unordered_map<std::string, std::string>& HttpResponse::getHeaders()

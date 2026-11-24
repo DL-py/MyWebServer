@@ -2,10 +2,101 @@
 
 #include <cstdlib>
 #include <cerrno>
+#include <ctime>
 #include <strings.h>
+
+#include "../http_utils/etag_cache.h"
 
 namespace
 {
+std::string httpDate(std::time_t when)
+{
+    struct tm tmv;
+    if (gmtime_r(&when, &tmv) == nullptr)
+    {
+        return "";
+    }
+    char buffer[64];
+    if (strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", &tmv) == 0)
+    {
+        return "";
+    }
+    return buffer;
+}
+
+bool parseHttpDate(const std::string& value, std::time_t& out)
+{
+    struct tm tmv;
+    memset(&tmv, 0, sizeof(tmv));
+    const char* end = strptime(value.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &tmv);
+    if (end == nullptr)
+    {
+        return false;
+    }
+    while (*end == ' ' || *end == '\t')
+    {
+        ++end;
+    }
+    if (*end != '\0')
+    {
+        return false;
+    }
+    out = timegm(&tmv);
+    return true;
+}
+
+bool etagMatches(const std::string& header, const std::string& etag)
+{
+    std::string trimmed = header;
+    while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '\t'))
+    {
+        trimmed.erase(trimmed.begin());
+    }
+    while (!trimmed.empty() &&
+           (trimmed[trimmed.size() - 1] == ' ' || trimmed[trimmed.size() - 1] == '\t'))
+    {
+        trimmed.erase(trimmed.size() - 1);
+    }
+    if (trimmed == "*")
+    {
+        return true;
+    }
+    if (etag.empty())
+    {
+        return false;
+    }
+
+    const std::string normalized = etag;
+    size_t start = 0;
+    while (start <= trimmed.size())
+    {
+        const size_t comma = trimmed.find(',', start);
+        std::string token = trimmed.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        while (!token.empty() && (token[0] == ' ' || token[0] == '\t'))
+        {
+            token.erase(token.begin());
+        }
+        while (!token.empty() && (token[token.size() - 1] == ' ' || token[token.size() - 1] == '\t'))
+        {
+            token.erase(token.size() - 1);
+        }
+        if (token.compare(0, 2, "W/") == 0 || token.compare(0, 2, "w/") == 0)
+        {
+            token.erase(0, 2);
+        }
+        if (token == normalized)
+        {
+            return true;
+        }
+        if (comma == std::string::npos)
+        {
+            break;
+        }
+        start = comma + 1;
+    }
+    return false;
+}
+
 const char* contentTypeForPath(const char* path)
 {
     const char* dot = strrchr(path, '.');
@@ -76,6 +167,22 @@ const char* contentTypeForPath(const char* path)
     if (strcasecmp(dot, ".pdf") == 0)
     {
         return "application/pdf";
+    }
+    if (strcasecmp(dot, ".webmanifest") == 0)
+    {
+        return "application/manifest+json";
+    }
+    if (strcasecmp(dot, ".eot") == 0)
+    {
+        return "application/vnd.ms-fontobject";
+    }
+    if (strcasecmp(dot, ".otf") == 0)
+    {
+        return "font/otf";
+    }
+    if (strcasecmp(dot, ".wasm") == 0)
+    {
+        return "application/wasm";
     }
     return "application/octet-stream";
 }
@@ -223,6 +330,54 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
     }
 
     resp.setHeader("Content-Type", contentTypeForPath(m_real_file));
+
+    const std::string etag = ETagCache::instance().etagFor(m_real_file, m_file_stat);
+    if (!etag.empty())
+    {
+        resp.setHeader("ETag", etag);
+    }
+    const std::string lastModified = httpDate(m_file_stat.st_mtime);
+    if (!lastModified.empty())
+    {
+        resp.setHeader("Last-Modified", lastModified);
+    }
+    const bool isHtml = strcmp(contentTypeForPath(m_real_file), "text/html; charset=utf-8") == 0;
+    resp.setHeader("Cache-Control", isHtml ? "no-cache" : "public, max-age=600");
+
+    bool notModified = false;
+    if (!m_not_found)
+    {
+        const std::string ifNoneMatch = req.getHeader("If-None-Match");
+        if (!ifNoneMatch.empty())
+        {
+            notModified = etagMatches(ifNoneMatch, etag);
+        }
+        else
+        {
+            const std::string ifModifiedSince = req.getHeader("If-Modified-Since");
+            std::time_t since = 0;
+            if (!ifModifiedSince.empty() && parseHttpDate(ifModifiedSince, since) &&
+                m_file_stat.st_mtime <= since)
+            {
+                notModified = true;
+            }
+        }
+    }
+    if (notModified)
+    {
+        resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::NOT_MODIFIED);
+        return false;
+    }
+
+    if (req.getMethod() == "HEAD")
+    {
+        resp.setHeader("Content-Length", std::to_string(m_file_stat.st_size));
+        if (!m_not_found)
+        {
+            resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::GOOD_REQUEST);
+        }
+        return false;
+    }
     return true;
 }
 

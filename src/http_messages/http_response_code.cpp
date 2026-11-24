@@ -5,6 +5,7 @@ const std::unordered_map<HttpResponseCode::HTTP_RESPONSE_CODE, std::string> Http
     {INIT_RESPONSE_CODE, "Init Response Code"},
     {GOOD_REQUEST, "OK"},
     {MOVED_PERMANENTLY, "Moved Permanently"},
+    {NOT_MODIFIED, "Not Modified"},
     {MOVED_TEMPORARILY, "Found"},
     {BAD_REQUEST, "Bad Request"},
     {UNAUTHORIZED, "Unauthorized"},

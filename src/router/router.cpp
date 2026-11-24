@@ -49,6 +49,17 @@ http_handler* Router::route(HttpRequest& req, HttpResponse& resp)
             }
             break;
         }
+        case HttpMthod::HEAD:
+        {
+            if (isCgi)
+            {
+                resp.setHeader("Allow", "GET, POST");
+                resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::METHOD_NOT_ALLOWED);
+                return nullptr;
+            }
+            handler = new http_handler_simple();
+            break;
+        }
         case HttpMthod::POST:
         {
             if (isCgi)
