@@ -72,6 +72,14 @@ void HttpRequest::setHeader(std::string name, std::string value)
     if (it == headers_.end())
     {
         headers_[key] = value;
+        return;
+    }
+    /* RFC 9110 5.3: repeated list-valued fields combine as a comma list.
+       Accept-Encoding is the one this server negotiates on. */
+    if (key == "accept-encoding")
+    {
+        it->second += ", ";
+        it->second += value;
     }
 }
 

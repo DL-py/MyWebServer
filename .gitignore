@@ -8,6 +8,7 @@
 # 中间设计与计划文档
 /superpowers/
 /.superpowers/
+/tests/
 
 # 编辑器与系统文件
 .vscode/

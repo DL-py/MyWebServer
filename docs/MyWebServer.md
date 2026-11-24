@@ -1,6 +1,6 @@
 ---
 title: "MyWebServer 总体设计说明"
-description: "基于 C/C++ 实现的轻量级 HTTP 服务器架构设计文档，涵盖 Epoll 并发模型、HTTP 消息层、连接管理、路由分发、线程池等模块的详细设计。"
+description: "基于 C/C++ 实现的轻量级 HTTP 服务器架构设计文档，涵盖 Epoll 并发模型、HTTP 消息层、连接管理、路由分发、协商缓存与 gzip 压缩等模块的详细设计。"
 date: 2025-01-01
 author: "MyWebServer Team"
 tags: ["C++", "HTTP Server", "Epoll", "多线程", "架构设计"]
@@ -20,10 +20,11 @@ MyWebServer 是一个基于 **C/C++** 实现的轻量级 HTTP 服务器，旨在
 |------|------|
 | I/O 模型 | Epoll + 边沿触发 (ET) + EPOLLONESHOT + 非阻塞 I/O |
 | 并发模型 | 半同步/半异步线程池（Leader/Worker 模式） |
-| HTTP 协议 | 支持 HTTP/1.1 GET/POST，支持 Connection: keep-alive |
+| HTTP 协议 | HTTP/1.1 GET/POST/HEAD；协商缓存（ETag/Last-Modified → 304）；Connection: keep-alive |
 | 配置管理 | 基于 libconfig 的结构化配置 |
-| 路由管理 | 基于请求方法的路由分发 |
-| 静态资源 | 支持 HTML/CSS/JS/图片等静态文件服务（mmap 零拷贝） |
+| 路由管理 | 基于请求方法的分发 |
+| 静态资源 | HTML/CSS/JS/图片等文件服务（mmap 零拷贝），目录 301、点路径 403、404 页面 |
+| 缓存与压缩 | 强 ETag（内容哈希）、条件请求 304、运行时 gzip（可配置阈值与缓存） |
 | CGI 扩展 | 支持 Python CGI 脚本（已实现） |
 | 用户管理 | MySQL 数据库 + SHA-256 加盐哈希（设计阶段） |
 | 日志系统 | 多级别运行时日志，支持日志截断 |
@@ -126,14 +127,16 @@ class HttpRequest {
 | `getMethod() / setMethod()` | 获取/设置请求方法 |
 | `getURL() / setURL()` | 获取/设置请求 URL |
 | `getVersion() / setVersion()` | 获取/设置 HTTP 版本 |
-| `getHeader() / setHeader()` | 读取/设置请求头字段 |
+| `getHeader() / setHeader()` | 读取/设置请求头字段；字段名大小写不敏感（RFC 9110 §5.1） |
 | `getBody() / setBody()` | 获取/设置请求体 |
+
+同名头部默认首值生效；`Accept-Encoding` 按 RFC 9110 §5.3 以逗号合并（该字段允许重复出现）。
 
 #### 3.1.2 HttpResponse — HTTP 响应
 
 ```cpp
 class HttpResponse {
-    int statusCode_;                          // 状态码 (200/400/404/500)
+    int statusCode_;                          // 状态码（200/301/304/404/503/...）
     string statusMessage_;                    // 状态消息
     unordered_map<string, string> headers_;   // 响应头部
     string body_;                             // 响应体
@@ -141,6 +144,8 @@ class HttpResponse {
 ```
 
 **额外方法：** `setStatusCodeAndMessage()` — 通过枚举值自动设置状态码和消息。
+
+`setHeader()` 采用**覆盖写**语义（同名头后写覆盖先写），HEAD 响应因此可以显式设置真实文件长度。
 
 #### 3.1.3 HttpRequestMethod — 请求方法枚举
 
@@ -153,10 +158,14 @@ class HttpResponse {
 | 状态码 | 含义 |
 |--------|------|
 | 200 | GOOD_REQUEST |
+| 301 | MOVED_PERMANENTLY（目录 URL 缺少尾斜杠） |
+| 304 | NOT_MODIFIED（条件请求命中） |
 | 400 | BAD_REQUEST |
-| 403 | FORBIDDEN_REQUEST |
+| 403 | FORBIDDEN_REQUEST（点路径等） |
 | 404 | NO_RESOURCE |
+| 405 | METHOD_NOT_ALLOWED（HEAD 请求 .cgi） |
 | 500 | INTERNAL_ERROR |
+| 503 | SERVICE_UNAVAILABLE（数据库未启用时的 /api/auth/*） |
 
 #### 3.1.5 HttpRequestParser — 请求解析器
 
@@ -195,12 +204,13 @@ class HttpResponse {
 | 方法 | 说明 |
 |------|------|
 | `httpResponseParser()` | 主接口，完成完整响应构建 |
-| `parseStatusLine()` | 构建 `HTTP/1.1 200 OK` |
-| `parseHeaders()` | 构建头部字段（Content-Type, Content-Length, Connection 等） |
+| `parseStatusLine()` | 构建 `HTTP/1.1 200 OK`（状态消息按值保存后再写入，避免悬垂临时对象） |
+| `parseHeaders()` | 构建头部字段；`Content-Length` 仅在处理器未设置时按响应体大小补齐，304 不写该头（RFC 9110 §8.6） |
 | `parseContent()` | 写入响应体 |
-| `getContentType()` | 根据 URL 后缀自动判断 MIME 类型 |
 
 **输出缓冲区：** 固定 8KB (`BUFFER_SIZE = 8192`)
+
+**MIME 判定：** 由静态资源处理器的 `contentTypeForPath()` 按**真实文件路径**的扩展名决定（不再按 URL 后缀）。
 
 ---
 
@@ -257,6 +267,42 @@ process() {
 | `modfd(epollfd, fd, ev)` | 修改监听事件 |
 | `removefd(epollfd, fd)` | 移除监听并关闭 socket |
 
+#### 3.2.3 ETagCache — 实体哈希索引
+
+```cpp
+class ETagCache {
+    static ETagCache& instance();
+    std::string etagFor(const std::string& path, const struct stat& st);
+};
+```
+
+- 以 `std::map<path, Entry{size, stamp, etag}>` 记录「文件大小 + 纳秒 mtime → ETag」，`std::mutex` 保护
+- `stamp = st_mtim.tv_sec * 1e9 + tv_nsec`；`size` 一起参与比较，覆盖同秒内改写但 mtime 未变的场景
+- 哈希为内容 FNV-1a 64 位，输出带双引号的强校验器（如 `"c2974a9f489cc4c1"`）
+- 命中且指纹一致时直接复用，不必重新读文件
+
+#### 3.2.4 gzip — 压缩与有界缓存
+
+```cpp
+bool gzipCompress(const char* data, std::size_t len, std::string& out);
+bool acceptsGzipEncoding(const std::string& header);
+
+class GzipCache {
+    static GzipCache& instance();
+    void setBudget(std::size_t bytes);
+    bool get(const std::string& path, long long size, long long stamp, std::string& out);
+    void put(const std::string& path, long long size, long long stamp, const std::string& body);
+    bool isCompressionNotBeneficial(const std::string& path, long long size, long long stamp);
+    void markCompressionNotBeneficial(const std::string& path, long long size, long long stamp);
+};
+```
+
+- 压缩参数：`deflateInit2(level 6, windowBits 15+16)`，即 gzip 包装；输出缓冲区按需倍增
+- `acceptsGzipEncoding` 是纯函数，大小写不敏感地解析逗号列表、`q=0`、`*`、`x-gzip`，便于单元测试
+- 缓存键为「路径 + 实体大小 + 纳秒指纹」，替换同键条目时正确维护总字节数
+- 预算默认 32 MB，由 `asset.gzip_cache_size` 注入；超出预算按插入顺序 FIFO 淘汰，单条超过预算的条目直接拒收
+- 负缓存标记（上限 4096 条）记录「压缩不划算」的实体，避免每次请求重复 deflate
+
 ---
 
 ### 3.3 路由管理层 (router/)
@@ -272,9 +318,12 @@ class Router {
 
 | 方法 | 处理逻辑 |
 |------|---------|
-| `GET` | 创建 `http_handler_simple`（静态资源服务） |
-| `POST` | 预留（CGI / 用户管理接口） |
+| `GET` | `.cgi` → `http_handler_cgi`；其余 → `http_handler_simple` |
+| `HEAD` | 同 GET；`HEAD` 到 `.cgi` → `405` + `Allow: GET, POST` |
+| `POST` | `.cgi` → `http_handler_cgi`；其余 → `400` |
 | 其他 | 返回 400 BAD_REQUEST |
+
+`/api/auth/*` 在数据库未启用时直接返回 `503`，不进入 handler。
 
 **设计初衷：** 基于请求方法和 URL 的映射表进行路由，支持模块化扩展。
 
@@ -296,19 +345,35 @@ class http_handler {
 
 #### 3.4.2 http_handler_simple — 静态资源处理
 
-处理 GET 请求的静态资源访问：
+处理 GET / HEAD 静态资源访问，并负责协商缓存、gzip 与路径安全：
 
 ```
-handler_pre()  → 权限检查（文件存在性、可读性）
-handler()      → mmap 文件到内存，设置响应头（Content-Type, Content-Length）
+handler_pre()  → 路径解析与安全校验、缓存头、条件请求（304）、gzip 协商
+handler()      → mmap（identity）或取压缩缓存体（gzip），设置响应体
 handler_post() → munmap 释放映射
 ```
 
-**关键特性：**
-- 使用 `mmap` 零拷贝技术
-- 自动识别 MIME 类型
-- 支持默认首页（`index.html`）
-- 文件路径长度限制：1024 字节
+**路径与响应行为：**
+- 忽略 URL 查询串；编码路径先解码再解析
+- 目录 URL 缺少尾斜杠 → `301` 并保留查询串
+- 点开头的路径段（如 `/.git/config`）→ `403`
+- 缺失路径优先返回 `doc_root/404.html`，无该文件则 404 空正文
+- HEAD 返回与 GET 相同的头与真实长度，不发正文；HEAD 到 `.cgi` → `405` + `Allow: GET, POST`
+
+**MIME 类型：** HTML/CSS/JS/MJS/JSON/MAP/XML/SVG/PNG/JPEG/WebP/GIF/ICO/TXT/WOFF/WOFF2/TTF/OTF/EOT/PDF/WASM/WebManifest，未知后缀回退 `application/octet-stream`。
+
+**协商缓存：**
+- `ETag`：内容 FNV-1a 64 位哈希（强校验器），由 `ETagCache` 按「路径 + 文件大小 + 纳秒 mtime」索引，进程内加锁复用；部署后 mtime 变化但内容不变时 ETag 不变
+- `Last-Modified`：RFC 1123 GMT
+- `Cache-Control`：HTML 为 `no-cache`，其余静态资源为 `public, max-age=600`
+- 条件请求：`If-None-Match` 优先（支持 `*`、逗号列表、`W/` 前缀），否则用 `If-Modified-Since`；命中返回 `304`（带 ETag/Cache-Control/Vary，无正文、无 Content-Length）
+
+**运行时 gzip：**
+- 开关与阈值来自配置（`asset.gzip` / `gzip_min_size` / `gzip_cache_size`）；可压缩类型为 text/*、JS、JSON、XML、SVG、manifest
+- 按 `Accept-Encoding` 协商（大小写不敏感，支持逗号列表、`q=0`、`*`、`x-gzip`）
+- 压缩结果由 `GzipCache` 缓存（键为路径 + 大小 + 纳秒 mtime，总预算 FIFO 淘汰）；压缩不划算的实体记负缓存标记，后续请求直接走 identity
+- 响应带 `Vary: Accept-Encoding`；gzip 表示使用独立强 ETag（`"<hash>-gzip"`），与 identity 表示互不混用
+- `Content-Length` 使用压缩后长度，保持 keep-alive 精确分帧；HEAD 与 GET 共用同一压缩结果
 
 #### 3.4.3 http_handler_cgi — CGI 脚本处理（已实现）
 
@@ -427,11 +492,29 @@ enum class LogLevel {
 
 ```cpp
 class Asset {
-    static char* doc_root;       // 文档根目录
-    static char* default_page;   // 默认首页
-    bool initAsset();            // 从配置初始化
+    static char* doc_root;        // 文档根目录
+    static char* default_page;    // 默认首页
+    static bool gzip_enabled;     // 运行时 gzip 总开关
+    static int gzip_min_size;     // 低于此值不压缩
+    static int gzip_cache_size;   // 压缩缓存总预算
+    bool initAsset();             // 从配置初始化
 };
 ```
+
+`asset` 配置段示例：
+
+```conf
+asset =
+{
+  doc_root = "/home/dl/DL-py.github.io";
+  default_page = "index.html";
+  gzip = true;              /* 总开关 */
+  gzip_min_size = "1K";     /* quantity 需带 K/M/G 后缀 */
+  gzip_cache_size = "32M";  /* 0 表示禁用压缩缓存 */
+}
+```
+
+非法类型或负值会让 `initAsset()` 失败；无法解析的 quantity 会打印告警并沿用默认值。
 
 #### 3.5.6 Global — 全局实例
 
@@ -482,14 +565,15 @@ extern Asset globalAsset;     // 全局资源
     │            ▼                                     │
     │   ┌──────────────────┐                          │
     │   │   Router::route   │                          │
-    │   │ GET  → handler    │                          │
+    │   │ GET/HEAD → handler│                          │
     │   │       _simple     │                          │
     │   └────────┬─────────┘                          │
     │            ▼                                     │
     │   ┌──────────────────┐                          │
     │   │   http_handler    │                          │
-    │   │   handler_pre     │ → 文件存在? 权限?         │
-    │   │   handler         │ → mmap 文件, 设响应头     │
+    │   │   handler_pre     │ → 路径/权限、ETag、304、   │
+    │   │                   │   gzip 协商               │
+    │   │   handler         │ → mmap 或压缩缓存体        │
     │   │   handler_post    │ → munmap                 │
     │   └────────┬─────────┘                          │
     │            ▼                                     │
@@ -526,9 +610,10 @@ extern Asset globalAsset;     // 全局资源
 | `logs/` | 多级别运行日志 |
 | `asset/` | 静态资源管理（文档根目录、默认页） |
 | `http_messages/` | HTTP 消息数据结构（请求/响应/状态码/解析器） |
-| `http_utils/` | HTTP 连接管理与 Epoll 工具函数 |
-| `router/` | 基于请求方法的路由分发 |
+| `http_utils/` | HTTP 连接、Epoll 工具、ETag 索引（`etag_cache`）、gzip 压缩与缓存（`gzip`） |
+| `router/` | 基于请求方法的分发 |
 | `handler/` | 业务处理器（静态资源、CGI 等） |
+| `tests/` | 集成测试（`hexo_hosting.sh`）与 gzip 单元测试 |
 | `docs/` | 项目文档 |
 
 ---
@@ -542,6 +627,7 @@ extern Asset globalAsset;     // 全局资源
 | Epoll | Linux I/O 多路复用 |
 | POSIX Threads | 多线程并发 |
 | mmap | 零拷贝文件传输 |
+| zlib | 运行时 gzip 压缩 |
 | libconfig | 结构化配置解析 |
 | MySQL | 用户数据持久化（设计阶段） |
 | Python | CGI 脚本语言（已实现） |
@@ -591,8 +677,12 @@ extern Asset globalAsset;     // 全局资源
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | CGI 支持 | 已实现 | Python 脚本处理，通过管道传输 HTTP 请求体 |
+| 静态站点托管 | 已实现 | 目录 301、点路径 403、404 页面、编码路径、无数据库启动 |
+| 协商缓存与 HEAD | 已实现 | 强 ETag（内容哈希）、Last-Modified、304、Cache-Control、HEAD |
+| Gzip 压缩 | 已实现 | 运行时 gzip，`Accept-Encoding` 协商、压缩缓存、`Vary`、变体 ETag |
 | 用户管理 | 设计完成 | MySQL + SHA-256，支持注册/登录/注销/信息修改 |
-| Gzip 压缩 | 需求确认 | 支持 gzip 传输格式，优化传输性能 |
+| Range / 206 | 需求确认 | 大文件分段下载 |
+| TLS（HTTPS） | 需求确认 | 证书与 TLS 终止 |
 | 异常处理 | 需求确认 | 统一异常处理逻辑（资源不存在、无权限等） |
 | 压力测试 | 方案确定 | 基于 Postman 的压力测试与性能分析 |
 
@@ -613,3 +703,9 @@ extern Asset globalAsset;     // 全局资源
 6. **SHA-256 + 盐值**：密码安全存储，每个用户独立的 16 字节随机盐值。
 
 7. **模板方法模式**：`handler_pre → handler → handler_post` 三段式接口，统一业务处理流程。
+
+8. **内容哈希强 ETag**：FNV-1a 64 位哈希，按「路径 + 文件大小 + 纳秒 mtime」索引复用；`hexo deploy` 刷新 mtime 但内容不变时 ETag 不变，重复访问仍可命中 304。
+
+9. **编码变体独立校验器**：gzip 与 identity 表示使用不同强 ETag（gzip 加 `-gzip` 后缀），并统一发 `Vary: Accept-Encoding`，避免共享缓存把两种表示混用。
+
+10. **有界压缩缓存**：压缩结果按总预算 FIFO 淘汰，键含文件大小与纳秒 mtime；压缩不划算的实体记录负缓存标记，后续重验证直接走 identity 并可正常返回 304。

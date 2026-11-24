@@ -2,6 +2,8 @@ cmake_minimum_required (VERSION 2.8)
 
 project(MyWebServer)
 
+find_package(ZLIB REQUIRED)
+
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/devel/lib)
 SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/devel)
 

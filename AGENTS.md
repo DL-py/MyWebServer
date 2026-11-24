@@ -17,14 +17,14 @@ cmake --build build -j4
 验证：
 
 ```bash
-bash tests/cgi_integration.sh
-g++ -std=c++11 -I. tests/cgi_exec_args_test.cpp handler/cgi_exec_args.cpp -o /tmp/cgi_exec_args_test && /tmp/cgi_exec_args_test
+bash tests/hexo_hosting.sh
+g++ -std=c++11 -Isrc/http_utils tests/gzip_cache_test.cpp src/http_utils/gzip.cpp -lz -o /tmp/gzip_cache_test && /tmp/gzip_cache_test
 ```
 
 系统依赖（Ubuntu）：
 
 ```bash
-sudo apt-get install -y build-essential cmake libconfig++-dev libconfig-dev libmysqlclient-dev libssl-dev
+sudo apt-get install -y build-essential cmake libconfig++-dev libconfig-dev libmysqlclient-dev libssl-dev zlib1g-dev
 ```
 
 首次构建：

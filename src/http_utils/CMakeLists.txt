@@ -6,4 +6,6 @@ SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/devel/lib/${CUR_DIR})
 set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -ggdb")
 
-add_library(http_utils SHARED http_conn.cpp http_request_parser.cpp http_response_parser.cpp etag_cache.cpp)
+add_library(http_utils SHARED http_conn.cpp http_request_parser.cpp http_response_parser.cpp etag_cache.cpp gzip.cpp)
+target_link_libraries(http_utils ${ZLIB_LIBRARIES})
+include_directories(${ZLIB_INCLUDE_DIRS})

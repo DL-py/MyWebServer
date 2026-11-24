@@ -6,9 +6,14 @@
 #include <strings.h>
 
 #include "../http_utils/etag_cache.h"
+#include "../http_utils/gzip.hpp"
 
 namespace
 {
+/* files above this size are served identity: readWholeFile buffers them and
+   zlib length fields are 32-bit. */
+const std::size_t kGzipMaxInput = 32 * 1024 * 1024;
+
 std::string httpDate(std::time_t when)
 {
     struct tm tmv;
@@ -95,6 +100,91 @@ bool etagMatches(const std::string& header, const std::string& etag)
         start = comma + 1;
     }
     return false;
+}
+
+bool isCompressibleType(const char* contentType)
+{
+    return strcasecmp(contentType, "text/html; charset=utf-8") == 0 ||
+           strcasecmp(contentType, "text/css") == 0 ||
+           strcasecmp(contentType, "text/javascript") == 0 ||
+           strcasecmp(contentType, "text/plain; charset=utf-8") == 0 ||
+           strcasecmp(contentType, "application/json") == 0 ||
+           strcasecmp(contentType, "application/xml") == 0 ||
+           strcasecmp(contentType, "application/manifest+json") == 0 ||
+           strcasecmp(contentType, "image/svg+xml") == 0;
+}
+
+std::string gzipVariant(const std::string& etag)
+{
+    if (etag.size() < 2 || etag[etag.size() - 1] != '"')
+    {
+        return "";
+    }
+    return etag.substr(0, etag.size() - 1) + "-gzip\"";
+}
+
+long long fileStamp(const struct stat& st)
+{
+    return static_cast<long long>(st.st_mtim.tv_sec) * 1000000000LL +
+           static_cast<long long>(st.st_mtim.tv_nsec);
+}
+
+bool readWholeFile(const std::string& path, std::string& out)
+{
+    FILE* file = fopen(path.c_str(), "rb");
+    if (file == nullptr)
+    {
+        return false;
+    }
+    std::string buffer;
+    char chunk[64 * 1024];
+    std::size_t readSize = 0;
+    while ((readSize = fread(chunk, 1, sizeof(chunk), file)) > 0)
+    {
+        buffer.append(chunk, readSize);
+    }
+    const bool ok = ferror(file) == 0;
+    fclose(file);
+    if (!ok)
+    {
+        return false;
+    }
+    out.swap(buffer);
+    return true;
+}
+
+enum GzipBuildResult
+{
+    GZIP_BUILT,
+    GZIP_NOT_SMALLER,
+    GZIP_UNAVAILABLE
+};
+
+/* returns a cached or freshly built gzip body for path+size+stamp. */
+GzipBuildResult gzipBody(const std::string& path, long long size, long long stamp,
+                         std::string& out)
+{
+    if (GzipCache::instance().get(path, size, stamp, out))
+    {
+        return GZIP_BUILT;
+    }
+    std::string raw;
+    if (!readWholeFile(path, raw))
+    {
+        return GZIP_UNAVAILABLE;
+    }
+    std::string compressed;
+    if (!gzipCompress(raw.data(), raw.size(), compressed))
+    {
+        return GZIP_UNAVAILABLE;
+    }
+    if (compressed.size() >= raw.size())
+    {
+        return GZIP_NOT_SMALLER;
+    }
+    GzipCache::instance().put(path, size, stamp, compressed);
+    out.swap(compressed);
+    return GZIP_BUILT;
 }
 
 const char* contentTypeForPath(const char* path)
@@ -190,7 +280,9 @@ const char* contentTypeForPath(const char* path)
 
 http_handler_simple::http_handler_simple()
     : m_not_found(false),
-      m_file_address(nullptr)
+      m_file_address(nullptr),
+      m_useGzip(false),
+      m_stamp(0)
 {
     m_real_file[0] = '\0';
     memset(&m_file_stat, 0, sizeof(m_file_stat));
@@ -331,10 +423,34 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
 
     resp.setHeader("Content-Type", contentTypeForPath(m_real_file));
 
-    const std::string etag = ETagCache::instance().etagFor(m_real_file, m_file_stat);
-    if (!etag.empty())
+    m_stamp = fileStamp(m_file_stat);
+    const bool canCompress = globalAsset.gzip_enabled &&
+                             isCompressibleType(contentTypeForPath(m_real_file)) &&
+                             m_file_stat.st_size > 0 &&
+                             m_file_stat.st_size >= globalAsset.gzip_min_size &&
+                             static_cast<off_t>(kGzipMaxInput) >= m_file_stat.st_size;
+    if (canCompress)
     {
-        resp.setHeader("ETag", etag);
+        resp.setHeader("Vary", "Accept-Encoding");
+    }
+
+    const std::string etag = ETagCache::instance().etagFor(m_real_file, m_file_stat);
+    const bool notBeneficial = canCompress &&
+        GzipCache::instance().isCompressionNotBeneficial(m_real_file, m_file_stat.st_size, m_stamp);
+    std::string variantEtag = etag;
+    if (canCompress && !notBeneficial &&
+        acceptsGzipEncoding(req.getHeader("Accept-Encoding")))
+    {
+        const std::string gzipEtag = gzipVariant(etag);
+        if (!gzipEtag.empty())
+        {
+            variantEtag = gzipEtag;
+            m_useGzip = true;
+        }
+    }
+    if (!variantEtag.empty())
+    {
+        resp.setHeader("ETag", variantEtag);
     }
     const std::string lastModified = httpDate(m_file_stat.st_mtime);
     if (!lastModified.empty())
@@ -350,7 +466,7 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
         const std::string ifNoneMatch = req.getHeader("If-None-Match");
         if (!ifNoneMatch.empty())
         {
-            notModified = etagMatches(ifNoneMatch, etag);
+            notModified = etagMatches(ifNoneMatch, variantEtag);
         }
         else
         {
@@ -369,9 +485,35 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
         return false;
     }
 
+    /* build the compressed representation once so HEAD and GET agree, and
+       fall back to identity (including its ETag) when compression is not
+       possible or not smaller. Remember the not-smaller verdict so later
+       revalidations take the identity path and can still answer 304. */
+    if (m_useGzip)
+    {
+        const GzipBuildResult result =
+            gzipBody(m_real_file, m_file_stat.st_size, m_stamp, m_gzipBody);
+        if (result == GZIP_NOT_SMALLER)
+        {
+            GzipCache::instance().markCompressionNotBeneficial(
+                m_real_file, m_file_stat.st_size, m_stamp);
+        }
+        if (result != GZIP_BUILT)
+        {
+            m_useGzip = false;
+            resp.setHeader("ETag", etag);
+        }
+    }
+
     if (req.getMethod() == "HEAD")
     {
-        resp.setHeader("Content-Length", std::to_string(m_file_stat.st_size));
+        std::size_t length = static_cast<std::size_t>(m_file_stat.st_size);
+        if (m_useGzip)
+        {
+            length = m_gzipBody.size();
+            resp.setHeader("Content-Encoding", "gzip");
+        }
+        resp.setHeader("Content-Length", std::to_string(length));
         if (!m_not_found)
         {
             resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::GOOD_REQUEST);
@@ -383,6 +525,17 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
 
 bool http_handler_simple::handler(HttpRequest& req, HttpResponse& resp)
 {
+    if (m_useGzip)
+    {
+        resp.setHeader("Content-Encoding", "gzip");
+        resp.setBody(m_gzipBody);
+        if (!m_not_found)
+        {
+            resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::GOOD_REQUEST);
+        }
+        return true;
+    }
+
     int fd = open( m_real_file, O_RDONLY );
     if (fd < 0)
     {

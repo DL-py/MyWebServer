@@ -32,7 +32,9 @@ private:
     bool m_not_found;
     char * m_file_address;
     struct stat m_file_stat;
-
+    bool m_useGzip;
+    long long m_stamp;
+    std::string m_gzipBody;
     // http_com::HTTP_CODE m_ret_code;
 };
 

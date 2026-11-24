@@ -16,6 +16,9 @@ asset =
 {
   doc_root = "/home/dl/DL-py.github.io";
   default_page = "index.html";
+  gzip = true;
+  gzip_min_size = "1K"; /* quantity strings need a K/M/G suffix */
+  gzip_cache_size = "32M";
 }
 
 db =

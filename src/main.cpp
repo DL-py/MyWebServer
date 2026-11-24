@@ -17,6 +17,7 @@
 #include "db/db_pool.h"
 #include <mysql.h>
 #include "./global/global.hpp"
+#include "./http_utils/gzip.hpp"
 #include "./http_utils/http_conn.h"
 #include "./handler/handler.h"
 #include "./config/config.hpp"
@@ -117,6 +118,7 @@ int main( int argc, char* argv[] )
         return -1;
     }
     globalAsset.PrintAsset();
+    GzipCache::instance().setBudget(globalAsset.gzip_cache_size);
 
     bool dbEnabled = false;
     if (cfg.exists("db.enabled"))
