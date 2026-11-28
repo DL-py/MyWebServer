@@ -1,6 +1,16 @@
 # AGENTS.md
 
-## 1. 常用命令
+本文件只记录 Agent 在本仓库工作所需的约束与最短命令；安装、运行与配置的完整说明见 `README.md`，验证流程见 `docs/VERIFICATION.md`。
+
+## 仓库约定
+
+- master 不自动暂存或提交，除非用户明确要求
+- `tests/` 只作本地验证，不纳入版本库；不要为了跑测试把测试文件加入 git
+- 中间设计、计划与审查记录放在 `superpowers/` 或 `.superpowers/`，均已忽略
+- `/home/dl/DL-py.github.io`（hexo 站点根目录）只读，不要修改
+- 修改行为后同步 `docs/MyWebServer.md`，保持文档与代码一致
+
+## 快速命令
 
 构建：
 
@@ -8,50 +18,26 @@
 cmake --build build -j4
 ```
 
+首次构建、依赖安装、配置说明见 `README.md`。
+
 启动（仓库根目录）：
 
 ```bash
 ./shells/start-server.sh
 ```
 
-验证（服务已在 6380 监听）：
+验证：按 `docs/VERIFICATION.md` 执行；提交前至少完成一次 clean build 且无新增告警：
 
 ```bash
-# Date 头存在且可被 date 解析
-date_str=$(curl -sfI http://127.0.0.1:6380/ | tr -d '\r' | sed -n 's/^[Dd]ate: //p')
-date -d "$date_str" +%s >/dev/null
-# 首页 200、gzip 200（约 745971 B）、带 ETag 重验证 304、HEAD 200 且 0 字节
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:6380/
-curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -H 'Accept-Encoding: gzip' http://127.0.0.1:6380/js/libs/mermaid.min.js
-etag=$(curl -sI -H 'Accept-Encoding: gzip' http://127.0.0.1:6380/js/libs/mermaid.min.js | tr -d '\r' | grep -i '^etag:' | cut -d' ' -f2-)
-curl -s -o /dev/null -w '%{http_code}\n' -H 'Accept-Encoding: gzip' -H "If-None-Match: $etag" http://127.0.0.1:6380/js/libs/mermaid.min.js
-curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -I http://127.0.0.1:6380/
+cmake --build build -j4 --clean-first
 ```
 
-单元测试（本地 `tests/`，不纳入版本库）：
+## 环境要点
 
-```bash
-g++ -std=c++11 -Isrc/http_utils tests/gzip_cache_test.cpp src/http_utils/gzip.cpp -lz -o /tmp/gzip_cache_test && /tmp/gzip_cache_test
-g++ -std=c++11 -Isrc/http_utils tests/http_protocol_test.cpp src/http_utils/http_protocol.cpp -o /tmp/http_protocol_test && /tmp/http_protocol_test
-g++ -std=c++11 -Isrc/http_utils tests/etag_cache_bound_test.cpp src/http_utils/etag_cache.cpp -o /tmp/etag_bound_test && /tmp/etag_bound_test
-```
-
-系统依赖（Ubuntu）：
-
-```bash
-sudo apt-get install -y build-essential cmake libconfig++-dev libconfig-dev libmysqlclient-dev libssl-dev zlib1g-dev
-```
-
-首次构建：
-
-```bash
-cmake -S . -B build
-cmake --build build -j4
-```
-
-查看/结束服务（进程名为 `leader`）：
-
-```bash
-ss -ltnp | grep :6380
-fuser -k 6380/tcp
-```
+- 服务端口 `6380`，进程名 `leader`
+- 运行日志：`devel/rtmsg.log`
+- 本地配置：`devel/common.cfg`（首次启动由 `src/common.cfg.example` 生成）
+- 优雅停止：`kill -TERM "$(pgrep -x leader | head -1)"`；`fuser -k 6380/tcp` 仅作无响应兜底
+- 测试或手工验证结束后不要保留 6380 上的运行实例
+- `Connection: keep-alive` 为显式 opt-in；无该请求头时响应后关闭连接
+- 未内置 TLS，生产环境建议由反向代理终止
