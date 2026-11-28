@@ -16,6 +16,10 @@ public:
     threadpool( int thread_number = 8, int max_requests = 10000 );
     ~threadpool();
     bool append( T* request );
+    /* stop accepting work, wake every worker and join them. Idempotent. */
+    void stop();
+    /* queued + currently running requests. */
+    int pendingCount() const { return m_pending.load(); }
 
 private:
     static void* worker( void* arg );
@@ -29,7 +33,8 @@ private:
     std::list< T* > m_workqueue;
     locker m_queuelocker;
     sem m_queuestat;
-    bool m_stop;
+    std::atomic< bool > m_stop;
+    std::atomic< int > m_pending;
 
     int counter;
     locker m_counterlocker;
@@ -37,7 +42,7 @@ private:
 
 template< typename T >
 threadpool< T >::threadpool( int thread_number, int max_requests ) : 
-        m_thread_number( thread_number ), m_max_requests( max_requests ), m_stop( false ), m_threads( NULL ), counter( 0 )
+        m_thread_number( thread_number ), m_max_requests( max_requests ), m_stop( false ), m_pending( 0 ), m_threads( NULL ), counter( 0 )
 {
     if( ( thread_number <= 0 ) || ( max_requests <= 0 ) )
     {
@@ -58,24 +63,40 @@ threadpool< T >::threadpool( int thread_number, int max_requests ) :
             delete [] m_threads;
             throw std::exception();
         }
-        if( pthread_detach( m_threads[i] ) )
-        {
-            delete [] m_threads;
-            throw std::exception();
-        }
     }
 }
 
 template< typename T >
 threadpool< T >::~threadpool()
 {
+    stop();
     delete [] m_threads;
-    m_stop = true;
+}
+
+template< typename T >
+void threadpool< T >::stop()
+{
+    if( m_stop.exchange( true ) )
+    {
+        return;
+    }
+    for( int i = 0; i < m_thread_number; ++i )
+    {
+        m_queuestat.post();
+    }
+    for( int i = 0; i < m_thread_number; ++i )
+    {
+        pthread_join( m_threads[i], NULL );
+    }
 }
 
 template< typename T >
 bool threadpool< T >::append( T* request )
 {
+    if( m_stop.load() )
+    {
+        return false;
+    }
     m_queuelocker.lock();
     if ( m_workqueue.size() > m_max_requests )
     {
@@ -83,6 +104,7 @@ bool threadpool< T >::append( T* request )
         return false;
     }
     m_workqueue.push_back( request );
+    m_pending.fetch_add( 1 );
     m_queuelocker.unlock();
     m_queuestat.post();
     return true;
@@ -108,7 +130,7 @@ template< typename T >
 void threadpool< T >::run()
 {
     setThreadName();
-    while ( ! m_stop )
+    while ( ! m_stop.load() )
     {
         m_queuestat.wait();
         m_queuelocker.lock();  /**only one thread can entry critical region*/
@@ -125,6 +147,7 @@ void threadpool< T >::run()
             continue;
         }
         request->process();  /* begin work by execute process function */
+        m_pending.fetch_sub( 1 );
     }
 }
 
@@ -146,6 +169,7 @@ bool threadpool< T >::setThreadName()
 
     pthread_getname_np(tid, threadName, maxThreadNameSize);
     std::cout << "tid: " << tid << "tname: " << threadName << std::endl;
+    return true;
 }
 
 #endif

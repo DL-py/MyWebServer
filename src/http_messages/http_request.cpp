@@ -75,8 +75,8 @@ void HttpRequest::setHeader(std::string name, std::string value)
         return;
     }
     /* RFC 9110 5.3: repeated list-valued fields combine as a comma list.
-       Accept-Encoding is the one this server negotiates on. */
-    if (key == "accept-encoding")
+       Accept-Encoding is negotiated and Connection accepts a token list. */
+    if (key == "accept-encoding" || key == "connection")
     {
         it->second += ", ";
         it->second += value;

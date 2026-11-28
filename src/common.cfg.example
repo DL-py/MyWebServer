@@ -10,6 +10,7 @@ log =
   log_level = "LOG_DEBUG";
   max_log_size = "16M"; /*16MB*/
   period_timeout = "20m"; /* 20minutes. */
+  access_log = true;
 }
 
 asset = 

@@ -1,7 +1,12 @@
 #include "http_conn.h"
 
+#include "http_protocol.hpp"
+
+#include <chrono>
+
 int HttpConn::userCount = 0;
 int HttpConn::epollfd = -1;
+std::atomic< int > HttpConn::pendingWrites(0);
 
 // utility
 int setnonblocking(int fd)
@@ -47,6 +52,11 @@ void HttpConn::initConn(int fd, const sockaddr_in& addr)
     address = addr;
     linger = false;
     writePos_ = 0;
+    clearResponsePending();
+    /* fd numbers are reused; never let a previous connection's bytes leak
+       into the next request parsed on this slot. */
+    readBuffer.clear();
+    writeBuffer.clear();
 
     int error = 0;
     socklen_t len = sizeof( error );
@@ -54,8 +64,29 @@ void HttpConn::initConn(int fd, const sockaddr_in& addr)
     int reuse = 1;
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
+    /* accepted sockets inherit SO_LINGER from the listener; an abortive
+       close would discard a response that is still in the send buffer. */
+    struct linger lingerOff = { 0, 0 };
+    setsockopt(sockfd, SOL_SOCKET, SO_LINGER, &lingerOff, sizeof(lingerOff));
+
     addfd(epollfd, sockfd, true );
     userCount++;
+}
+
+void HttpConn::markResponsePending()
+{
+    if (!writePending_.exchange(true))
+    {
+        pendingWrites.fetch_add(1);
+    }
+}
+
+void HttpConn::clearResponsePending()
+{
+    if (writePending_.exchange(false))
+    {
+        pendingWrites.fetch_sub(1);
+    }
 }
 
 void HttpConn::resetConn()
@@ -71,6 +102,7 @@ void HttpConn::closeConn()
 {
     if(sockfd != -1)
     {
+        clearResponsePending();
         removefd(epollfd, sockfd);
         sockfd = -1;
         userCount--;
@@ -146,7 +178,15 @@ bool HttpConn::bufferWrite()
         // send finish
         if (bytesToWrite <= 0)
         {
-            resetConn();
+            clearResponsePending();
+            if (linger)
+            {
+                resetConn();
+            }
+            else
+            {
+                closeConn();
+            }
             return true;
         }
     }
@@ -155,6 +195,7 @@ bool HttpConn::bufferWrite()
 
 void HttpConn::process()
 {
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     HttpRequest httpRequest;
     HttpResponse httpResponse;
     HttpRequestParser httpRequestParser(readBuffer);
@@ -176,7 +217,6 @@ void HttpConn::process()
         Router::handlerDestory(handler);
     }
 
-response:
     HttpResponseParser httpResponseParser;
     httpResponseParser.httpResponseParser(httpRequest, httpResponse);
 
@@ -184,11 +224,30 @@ response:
 
     writeBuffer = std::move(parseBuffer);
 
-    const std::string conn = httpResponse.getHeader("Connection");
-    if (conn == "keep-alive")
+    if (logger.accessLogEnabled())
     {
-        linger = true;
+        std::string url = httpRequest.getURL();
+        if (url.size() > 512)
+        {
+            url.resize(512);
+        }
+        for (std::size_t i = 0; i < url.size(); ++i)
+        {
+            const unsigned char c = static_cast<unsigned char>(url[i]);
+            if (c < 0x20 || c == 0x7f)
+            {
+                url[i] = '?';
+            }
+        }
+        const long long elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        LogRecord(logger, LogLevel::LOG_INFO, "ACCESS %s %s %d %d %lldms\n",
+                  httpRequest.getMethod().c_str(), url.c_str(), httpResponse.getStatusCode(),
+                  static_cast<int>(httpResponse.getBody().size()), elapsedMs);
     }
+
+    const std::string conn = httpResponse.getHeader("Connection");
+    linger = headerHasToken(conn, "keep-alive");
 
     modfd(epollfd, sockfd, EPOLLOUT);
 }

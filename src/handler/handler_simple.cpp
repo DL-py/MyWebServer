@@ -7,48 +7,13 @@
 
 #include "../http_utils/etag_cache.h"
 #include "../http_utils/gzip.hpp"
+#include "../http_utils/http_protocol.hpp"
 
 namespace
 {
 /* files above this size are served identity: readWholeFile buffers them and
    zlib length fields are 32-bit. */
 const std::size_t kGzipMaxInput = 32 * 1024 * 1024;
-
-std::string httpDate(std::time_t when)
-{
-    struct tm tmv;
-    if (gmtime_r(&when, &tmv) == nullptr)
-    {
-        return "";
-    }
-    char buffer[64];
-    if (strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S GMT", &tmv) == 0)
-    {
-        return "";
-    }
-    return buffer;
-}
-
-bool parseHttpDate(const std::string& value, std::time_t& out)
-{
-    struct tm tmv;
-    memset(&tmv, 0, sizeof(tmv));
-    const char* end = strptime(value.c_str(), "%a, %d %b %Y %H:%M:%S GMT", &tmv);
-    if (end == nullptr)
-    {
-        return false;
-    }
-    while (*end == ' ' || *end == '\t')
-    {
-        ++end;
-    }
-    if (*end != '\0')
-    {
-        return false;
-    }
-    out = timegm(&tmv);
-    return true;
-}
 
 bool etagMatches(const std::string& header, const std::string& etag)
 {
@@ -129,25 +94,27 @@ long long fileStamp(const struct stat& st)
            static_cast<long long>(st.st_mtim.tv_nsec);
 }
 
-bool readWholeFile(const std::string& path, std::string& out)
+bool readWholeFileFromFd(int fd, std::size_t size, std::string& out)
 {
-    FILE* file = fopen(path.c_str(), "rb");
-    if (file == nullptr)
-    {
-        return false;
-    }
     std::string buffer;
-    char chunk[64 * 1024];
-    std::size_t readSize = 0;
-    while ((readSize = fread(chunk, 1, sizeof(chunk), file)) > 0)
+    buffer.resize(size);
+    std::size_t done = 0;
+    while (done < size)
     {
-        buffer.append(chunk, readSize);
-    }
-    const bool ok = ferror(file) == 0;
-    fclose(file);
-    if (!ok)
-    {
-        return false;
+        const ssize_t n = pread(fd, &buffer[done], size - done, static_cast<off_t>(done));
+        if (n < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            return false;
+        }
+        if (n == 0)
+        {
+            return false;
+        }
+        done += static_cast<std::size_t>(n);
     }
     out.swap(buffer);
     return true;
@@ -161,7 +128,7 @@ enum GzipBuildResult
 };
 
 /* returns a cached or freshly built gzip body for path+size+stamp. */
-GzipBuildResult gzipBody(const std::string& path, long long size, long long stamp,
+GzipBuildResult gzipBody(int fd, const std::string& path, long long size, long long stamp,
                          std::string& out)
 {
     if (GzipCache::instance().get(path, size, stamp, out))
@@ -169,7 +136,7 @@ GzipBuildResult gzipBody(const std::string& path, long long size, long long stam
         return GZIP_BUILT;
     }
     std::string raw;
-    if (!readWholeFile(path, raw))
+    if (!readWholeFileFromFd(fd, static_cast<std::size_t>(size), raw))
     {
         return GZIP_UNAVAILABLE;
     }
@@ -281,6 +248,7 @@ const char* contentTypeForPath(const char* path)
 http_handler_simple::http_handler_simple()
     : m_not_found(false),
       m_file_address(nullptr),
+      m_fd(-1),
       m_useGzip(false),
       m_stamp(0)
 {
@@ -290,7 +258,11 @@ http_handler_simple::http_handler_simple()
 
 http_handler_simple::~http_handler_simple()
 {
-
+    if (m_fd >= 0)
+    {
+        close(m_fd);
+        m_fd = -1;
+    }
 }
 
 bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
@@ -392,20 +364,41 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
     }
 
     snprintf(m_real_file, FILENAME_LEN, "%s", realFile.c_str());
-    if (stat( m_real_file, &m_file_stat ) < 0 )
+    m_fd = open(m_real_file, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (m_fd < 0)
     {
+        resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::NO_RESOURCE);
+        return false;
+    }
+
+    if (fstat(m_fd, &m_file_stat) < 0)
+    {
+        close(m_fd);
+        m_fd = -1;
+        resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::NO_RESOURCE);
+        return false;
+    }
+
+    if (!S_ISREG(m_file_stat.st_mode) && !S_ISDIR(m_file_stat.st_mode))
+    {
+        close(m_fd);
+        m_fd = -1;
         resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::NO_RESOURCE);
         return false;
     }
 
     if ( ! ( m_file_stat.st_mode & S_IROTH ) )
     {
+        close(m_fd);
+        m_fd = -1;
         resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::FORBIDDEN_REQUEST);
         return false;
     }
 
     if ( S_ISDIR( m_file_stat.st_mode ) )
     {
+        close(m_fd);
+        m_fd = -1;
         std::string location = req.getURL();
         const size_t queryPos2 = location.find('?');
         if (queryPos2 == std::string::npos)
@@ -492,7 +485,7 @@ bool http_handler_simple::handler_pre(HttpRequest& req, HttpResponse& resp)
     if (m_useGzip)
     {
         const GzipBuildResult result =
-            gzipBody(m_real_file, m_file_stat.st_size, m_stamp, m_gzipBody);
+            gzipBody(m_fd, m_real_file, m_file_stat.st_size, m_stamp, m_gzipBody);
         if (result == GZIP_NOT_SMALLER)
         {
             GzipCache::instance().markCompressionNotBeneficial(
@@ -536,8 +529,7 @@ bool http_handler_simple::handler(HttpRequest& req, HttpResponse& resp)
         return true;
     }
 
-    int fd = open( m_real_file, O_RDONLY );
-    if (fd < 0)
+    if (m_fd < 0)
     {
         resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::NO_RESOURCE);
         return false;
@@ -550,12 +542,14 @@ bool http_handler_simple::handler(HttpRequest& req, HttpResponse& resp)
         {
             resp.setStatusCodeAndMessage((int)HttpResponseCode::HTTP_RESPONSE_CODE::GOOD_REQUEST);
         }
-        close(fd);
+        close(m_fd);
+        m_fd = -1;
         return true;
     }
 
-    m_file_address = ( char* )mmap( 0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, fd, 0 );
-    close(fd);
+    m_file_address = ( char* )mmap( 0, m_file_stat.st_size, PROT_READ, MAP_PRIVATE, m_fd, 0 );
+    close(m_fd);
+    m_fd = -1;
     if (m_file_address == MAP_FAILED)
     {
         m_file_address = nullptr;

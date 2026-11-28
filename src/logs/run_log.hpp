@@ -39,9 +39,11 @@ private:
     uint64_t  maxLogSize_;
     time_t lastTruncTime_;
     time_t periodTimeOut_;
+    bool accessLog_;
 public:
     bool initLogger();
     void printLogger();
+    bool accessLogEnabled() const { return accessLog_; }
     bool logRecord_(const LogLevel& level, const char* file, const char* func, int line, const char* format, ...);
 
 private:

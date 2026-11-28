@@ -1,5 +1,28 @@
 #include "http_response_parser.h"
 
+#include <ctime>
+
+#include <strings.h>
+
+#include "http_protocol.hpp"
+
+namespace
+{
+bool hasHeaderIgnoreCase(HttpResponse& resp, const char* name)
+{
+    const std::unordered_map<std::string, std::string>& headers = resp.getHeaders();
+    for (std::unordered_map<std::string, std::string>::const_iterator it = headers.begin();
+         it != headers.end(); ++it)
+    {
+        if (strcasecmp(it->first.c_str(), name) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
 HttpResponseParser::HttpResponseParser():parserState_(ParserState::PARSER_STATE_STATUSLINE)
 {
 
@@ -42,8 +65,19 @@ bool HttpResponseParser::parseHeaders(HttpRequest& req, HttpResponse& resp)
         resp.setHeader("Content-Length", std::to_string(bodySize));
     }
 
+    if (!hasHeaderIgnoreCase(resp, "Date"))
+    {
+        const std::string now = httpDate(std::time(nullptr));
+        if (!now.empty())
+        {
+            resp.setHeader("Date", now);
+        }
+    }
+
+    /* keep the pre-existing opt-in semantics: only an explicit keep-alive
+       token reuses the connection; close wins when both are present. */
     const std::string conn = req.getHeader("Connection");
-    if (conn == "keep-alive")
+    if (!headerHasToken(conn, "close") && headerHasToken(conn, "keep-alive"))
     {
         resp.setHeader("Connection", "keep-alive");
     }

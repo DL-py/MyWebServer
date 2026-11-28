@@ -10,7 +10,7 @@ const std::uint64_t FNV_PRIME = 1099511628211ULL;
 const std::size_t CHUNK_SIZE = 64 * 1024;
 }  // namespace
 
-ETagCache::ETagCache()
+ETagCache::ETagCache() : seq_(0)
 {
 }
 
@@ -56,6 +56,12 @@ bool ETagCache::hashFile(const std::string& path, std::string& out)
     return true;
 }
 
+std::size_t ETagCache::entryCount()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return entries_.size();
+}
+
 std::string ETagCache::etagFor(const std::string& path, const struct stat& st)
 {
     const long long size = static_cast<long long>(st.st_size);
@@ -79,9 +85,23 @@ std::string ETagCache::etagFor(const std::string& path, const struct stat& st)
 
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (entries_.find(path) == entries_.end() && entries_.size() >= MAX_ENTRIES)
+        {
+            auto oldest = entries_.begin();
+            for (auto it = entries_.begin(); it != entries_.end(); ++it)
+            {
+                if (it->second.seq < oldest->second.seq)
+                {
+                    oldest = it;
+                }
+            }
+            entries_.erase(oldest);
+        }
+
         Entry entry;
         entry.size = size;
         entry.stamp = stamp;
+        entry.seq = seq_++;
         entry.etag = etag;
         entries_[path] = entry;
     }

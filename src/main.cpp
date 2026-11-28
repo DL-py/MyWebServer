@@ -11,6 +11,7 @@
 #include <sys/epoll.h>
 #include <signal.h>
 #include <sys/types.h>
+#include <chrono>
 
 #include "locker.h"
 #include "threadpool.h"
@@ -25,6 +26,13 @@
 
 #define MAX_FD 65536
 #define MAX_EVENT_NUMBER 10000
+
+static volatile sig_atomic_t g_stop = 0;
+
+static void stopHandler( int )
+{
+    g_stop = 1;
+}
 
 extern int addfd( int epollfd, int fd, bool one_shot );
 extern int removefd( int epollfd, int fd );
@@ -211,6 +219,8 @@ int main( int argc, char* argv[] )
     }
 
     addsig( SIGPIPE, SIG_IGN );
+    addsig( SIGTERM, stopHandler, false );
+    addsig( SIGINT, stopHandler, false );
 
     threadpool<HttpConn>* pool = NULL;
     try
@@ -229,8 +239,6 @@ int main( int argc, char* argv[] )
 
     int listenfd = socket( PF_INET, SOCK_STREAM, 0 );
     assert( listenfd >= 0 );
-    struct linger tmp = { 1, 0 };
-    setsockopt( listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof( tmp ) );
 
     /* allow restart while old connections are in TIME_WAIT. */
     int reuse = 1;
@@ -273,11 +281,15 @@ int main( int argc, char* argv[] )
 
     HttpConn::epollfd = epollfd;
 
-    while( true )
+    while( ! g_stop )
     {
         int number = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, -1);
-        if ((number < 0) && (errno != EINTR))
+        if (number < 0)
         {
+            if (errno == EINTR)
+            {
+                continue;
+            }
             LogRecord(logger, LogLevel::LOG_EMERG, "epoll failed.\n");
             break;
         }
@@ -312,7 +324,11 @@ int main( int argc, char* argv[] )
             {
                 if (users[sockfd].bufferRead())
                 {
-                    pool->append(users + sockfd);
+                    users[sockfd].markResponsePending();
+                    if (!pool->append(users + sockfd))
+                    {
+                        users[sockfd].closeConn();
+                    }
                 }
                 else
                 {
@@ -331,8 +347,79 @@ int main( int argc, char* argv[] )
         }
     }
 
-    close(epollfd);
     close(listenfd);
+
+    /* Stop accepting, then keep the event loop alive briefly so in-flight
+       responses are actually flushed instead of dying with the process.
+       Idle keep-alive sockets produce no events; three quiet 100ms polls
+       with an empty work queue end the drain early. */
+    const std::chrono::steady_clock::time_point drainDeadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    int idlePolls = 0;
+    while (HttpConn::userCount > 0 || pool->pendingCount() > 0 ||
+           HttpConn::pendingWrites.load() > 0)
+    {
+        if (std::chrono::steady_clock::now() >= drainDeadline)
+        {
+            break;
+        }
+        if (pool->pendingCount() == 0 && HttpConn::pendingWrites.load() == 0 &&
+            idlePolls >= 3)
+        {
+            break;
+        }
+
+        int number = epoll_wait(epollfd, events, MAX_EVENT_NUMBER, 100);
+        if (number < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            LogRecord(logger, LogLevel::LOG_ERR, "epoll failed while draining.\n");
+            break;
+        }
+        if (number == 0)
+        {
+            ++idlePolls;
+            continue;
+        }
+        idlePolls = 0;
+
+        for (int i = 0; i < number; i++)
+        {
+            const int fd = events[i].data.fd;
+            if (fd == listenfd || fd < 0 || fd >= MAX_FD || !users[fd].isOpen())
+            {
+                continue;
+            }
+            if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR))
+            {
+                users[fd].closeConn();
+            }
+            else if (events[i].events & EPOLLOUT)
+            {
+                if (!users[fd].bufferWrite())
+                {
+                    users[fd].closeConn();
+                }
+            }
+            /* EPOLLIN is ignored: no new requests are accepted during drain. */
+        }
+    }
+
+    /* Joining workers also guarantees no thread still points at users[]. */
+    pool->stop();
+    for (int fd = 0; fd < MAX_FD; ++fd)
+    {
+        if (users[fd].isOpen())
+        {
+            users[fd].closeConn();
+        }
+    }
+    LogRecord(logger, LogLevel::LOG_INFO, "server stopped, remaining connections: %d\n",
+              HttpConn::userCount);
+    close(epollfd);
     delete [] users;
     delete pool;
     delete globalDbPool;

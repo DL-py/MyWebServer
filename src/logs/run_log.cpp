@@ -7,6 +7,7 @@ Logger::Logger()
     logLevel_ = LogLevel::LOG_INFO;
     maxLogSize_ = 64 * 1024 * 1024; /* 64MB. */
     periodTimeOut_ = 10 * 60;  /* 10 minutes. */
+    accessLog_ = true;
 }
 
 Logger::~Logger()
@@ -41,6 +42,24 @@ bool Logger::initLogger()
             if (! converStringToLogLevel(logLevel))
             {
                 std::cerr<<"invalid configration item log.log_level: "<< logLevel << std::endl;
+            }
+        }
+
+        if (cfg.exists("log.access_log"))
+        {
+            const Setting& setting = cfg.lookup("log.access_log");
+            if (setting.getType() == Setting::TypeBoolean)
+            {
+                accessLog_ = (bool)setting;
+            }
+            else if (setting.getType() == Setting::TypeInt)
+            {
+                accessLog_ = ((int)setting != 0);
+            }
+            else
+            {
+                std::cerr<<"invalid configuration type: log.access_log"<<std::endl;
+                return false;
             }
         }
     }
@@ -124,10 +143,11 @@ bool Logger::logRecord_(const LogLevel& level, const char* file, const char* fun
 
     fprintf(logFD_, "[%s] [%s] [%s|%lu] [%s:%d|%s] ", curTime, converLogLevelToString(level).c_str(), threadName, tid, getFileName(file), line, func);
     vfprintf(logFD_, format, args);
+    fflush(logFD_);
     pthread_mutex_unlock(&mutex_);
 
     va_end(args);
-    fflush(logFD_);
+    return true;
 }
 
 bool Logger::converStringToLogLevel(const std::string& logLevel)

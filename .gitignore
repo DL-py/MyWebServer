@@ -5,7 +5,7 @@
 *.a
 *.so
 
-# 中间设计与计划文档
+# 中间设计、计划与测试文档
 /superpowers/
 /.superpowers/
 /tests/

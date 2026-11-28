@@ -31,6 +31,7 @@ private:
     char m_real_file[FILENAME_LEN];
     bool m_not_found;
     char * m_file_address;
+    int m_fd;
     struct stat m_file_stat;
     bool m_useGzip;
     long long m_stamp;

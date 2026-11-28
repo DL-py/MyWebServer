@@ -1,5 +1,6 @@
 #ifndef HTTP_CONN_H
 #define HTTP_CONN_H
+#include <atomic>
 #include <string>
 
 // Linux Header
@@ -32,6 +33,8 @@ private:
 public:
 	static int epollfd;
 	static int userCount;
+	/* responses queued for EPOLLOUT but not fully flushed yet. */
+	static std::atomic< int > pendingWrites;
 
 private:
     std::string  readBuffer;  // http request buffer
@@ -40,13 +43,17 @@ private:
     int sockfd;
 	sockaddr_in address;
     bool linger;
+    std::atomic< bool > writePending_;
 
 public:
-    HttpConn() {}
+    HttpConn() : writePos_(0), sockfd(-1), linger(false), writePending_(false) {}
     ~HttpConn() {}
 
 public:
     void initConn(int sockfd, const sockaddr_in& addr);
+    bool isOpen() const { return sockfd != -1; }
+    /* called by the main thread when a request is queued for a worker. */
+    void markResponsePending();
     void closeConn();
     bool bufferRead();
     bool bufferWrite();
@@ -56,6 +63,7 @@ public:
     const std::string& getWriteBuffer();
 
 private:
+    void clearResponsePending();
     void resetConn();
 };
 #endif

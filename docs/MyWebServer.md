@@ -27,7 +27,7 @@ MyWebServer 是一个基于 **C/C++** 实现的轻量级 HTTP 服务器，旨在
 | 缓存与压缩 | 强 ETag（内容哈希）、条件请求 304、运行时 gzip（可配置阈值与缓存） |
 | CGI 扩展 | 支持 Python CGI 脚本（已实现） |
 | 用户管理 | MySQL 数据库 + SHA-256 加盐哈希（设计阶段） |
-| 日志系统 | 多级别运行时日志，支持日志截断 |
+| 日志系统 | 多级别运行时日志与逐请求 ACCESS 行 |
 
 ---
 
@@ -205,12 +205,14 @@ class HttpResponse {
 |------|------|
 | `httpResponseParser()` | 主接口，完成完整响应构建 |
 | `parseStatusLine()` | 构建 `HTTP/1.1 200 OK`（状态消息按值保存后再写入，避免悬垂临时对象） |
-| `parseHeaders()` | 构建头部字段；`Content-Length` 仅在处理器未设置时按响应体大小补齐，304 不写该头（RFC 9110 §8.6） |
+| `parseHeaders()` | 构建头部字段；未设置时补 `Date`（IMF-fixdate GMT）；`Content-Length` 仅在处理器未设置时按响应体大小补齐，304 不写该头（RFC 9110 §8.6） |
 | `parseContent()` | 写入响应体 |
 
 **输出缓冲区：** 固定 8KB (`BUFFER_SIZE = 8192`)
 
 **MIME 判定：** 由静态资源处理器的 `contentTypeForPath()` 按**真实文件路径**的扩展名决定（不再按 URL 后缀）。
+
+**`Connection` 判定：** 按逗号拆分、忽略 OWS、大小写不敏感地匹配 `keep-alive` / `close`；同时出现两者时 `close` 优先。该解析由 `http_protocol.hpp` 的 `headerHasToken()` 共享给响应构建与连接复用判定。
 
 ---
 
@@ -256,7 +258,11 @@ process() {
 }
 ```
 
-**长连接处理：** 在 `bufferWrite()` 完成后，若 HTTP 头部 `Connection: keep-alive`，则调用 `resetConn()` 重置缓冲区并重新注册 `EPOLLIN`。
+**长连接处理：** 在 `bufferWrite()` 完成后，若响应头 `Connection` 含 `keep-alive` token，则调用 `resetConn()` 重置缓冲区并重新注册 `EPOLLIN`。
+
+**访问日志：** 每个请求在响应构建完成后写一行 `ACCESS <方法> <URL> <状态码> <响应体字节> <耗时>ms`，URL 截断到 512 字节并剔除控制字符；由 `log.access_log` 开关控制。日志在持有互斥锁时写入并立即 `fflush`。
+
+**优雅退出：** `main` 捕获 `SIGTERM` / `SIGINT`，主循环以 `sig_atomic_t` 标志退出；先关闭监听 fd，再保持事件循环最多 5 秒排空在途响应（空闲 keep-alive 约 300ms 提前退出），随后 join worker 线程、关闭剩余连接，最后记录 `server stopped` 并释放资源。
 
 #### 3.2.2 Epoll 工具函数
 
@@ -280,6 +286,7 @@ class ETagCache {
 - `stamp = st_mtim.tv_sec * 1e9 + tv_nsec`；`size` 一起参与比较，覆盖同秒内改写但 mtime 未变的场景
 - 哈希为内容 FNV-1a 64 位，输出带双引号的强校验器（如 `"c2974a9f489cc4c1"`）
 - 命中且指纹一致时直接复用，不必重新读文件
+- 索引上限 4096 条；超限时按插入序号淘汰最小者，同路径覆盖会刷新序号
 
 #### 3.2.4 gzip — 压缩与有界缓存
 
@@ -358,6 +365,7 @@ handler_post() → munmap 释放映射
 - 目录 URL 缺少尾斜杠 → `301` 并保留查询串
 - 点开头的路径段（如 `/.git/config`）→ `403`
 - 缺失路径优先返回 `doc_root/404.html`，无该文件则 404 空正文
+- `handler_pre` 只 `open` 一次（`O_RDONLY | O_CLOEXEC`）并 `fstat`，后续 mmap / gzip 读取复用同一 fd，避免「先 stat 后 open」的 TOCTOU；304 / HEAD / 301 等未进入 `handler()` 的路径由析构关闭 fd
 - HEAD 返回与 GET 相同的头与真实长度，不发正文；HEAD 到 `.cgi` → `405` + `Allow: GET, POST`
 
 **MIME 类型：** HTML/CSS/JS/MJS/JSON/MAP/XML/SVG/PNG/JPEG/WebP/GIF/ICO/TXT/WOFF/WOFF2/TTF/OTF/EOT/PDF/WASM/WebManifest，未知后缀回退 `application/octet-stream`。
@@ -485,7 +493,9 @@ enum class LogLevel {
 **特性：**
 - 基于日志级别过滤
 - 自动记录文件名、函数名、行号
-- 文件大小监控与自动截断
+- 日志以写模式打开（重启即截断）；`log.max_log_size` / `log.period_timeout` 目前仅解析，尚未参与轮转
+- 每行在持有互斥锁时写入并 `fflush`，进程退出前不会丢日志
+- `log.access_log`（默认 `true`）控制逐请求 `ACCESS` 行
 - 通过宏 `LogRecord(logger, level, format, ...)` 简化调用
 
 #### 3.5.5 Asset — 静态资源管理
@@ -708,4 +718,6 @@ extern Asset globalAsset;     // 全局资源
 
 9. **编码变体独立校验器**：gzip 与 identity 表示使用不同强 ETag（gzip 加 `-gzip` 后缀），并统一发 `Vary: Accept-Encoding`，避免共享缓存把两种表示混用。
 
-10. **有界压缩缓存**：压缩结果按总预算 FIFO 淘汰，键含文件大小与纳秒 mtime；压缩不划算的实体记录负缓存标记，后续重验证直接走 identity 并可正常返回 304。
+10. **keep-alive 为显式 opt-in**：仅当请求 `Connection` 含 `keep-alive` token 才复用连接，HTTP/1.1 默认持久连接未实现（RFC 9112 §9.3 偏差）。代价是浏览器等默认不发该头的 HTTP/1.1 客户端会为每个资源新建连接；本阶段按决策保留该偏差。
+
+11. **有界压缩缓存**：压缩结果按总预算 FIFO 淘汰，键含文件大小与纳秒 mtime；压缩不划算的实体记录负缓存标记，后续重验证直接走 identity 并可正常返回 304。
